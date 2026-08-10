@@ -1,0 +1,57 @@
+{
+  "identifier" : "31DAFEA8-4A6B-43B4-9CE9-1630021DD5E2",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "2B8BEB5F-555B-49BD-A3F8-975C8D6604AA",
+      "localizations" : [
+
+      ],
+      "name" : "Pro Coach",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "5.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "AA57B65F-9C72-4A09-A642-93351714ABCC",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited managed coach commentary.",
+              "displayName" : "Pro Coach Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "dev.teachmechess.app.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pro Coach Monthly",
+          "subscriptionGroupID" : "2B8BEB5F-555B-49BD-A3F8-975C8D6604AA",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

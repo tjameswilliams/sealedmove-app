@@ -1,0 +1,16 @@
+[package]
+name = "stockfish-embedded"
+version = "0.1.0"
+edition.workspace = true
+# NOT the workspace MIT: this crate statically links Stockfish (GPLv3), so
+# the crate itself is GPL. Keeping it a separate leaf crate is what isolates
+# the GPL boundary — see README.md before shipping anything that links it.
+license = "GPL-3.0-only"
+description = "Stockfish 11 statically linked into the process, exposed as a coach-core ChannelTransport for platforms that cannot spawn subprocesses (iOS)."
+
+[dependencies]
+coach-core = { path = "../coach-core" }
+tokio = { workspace = true }
+
+[build-dependencies]
+cc = "1"

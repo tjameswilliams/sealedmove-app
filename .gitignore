@@ -1,0 +1,7 @@
+target/
+apps/ios/build/
+apps/ios/TeachMeChess.xcodeproj/
+apps/ios/Frameworks/*.xcframework
+apps/ios/signing.xcconfig
+.DS_Store
+xcuserdata/

@@ -1,0 +1,13 @@
+// Base build configuration for the TeachMeChess target (committed).
+//
+// The line below optionally pulls in a LOCAL, gitignored signing file for
+// running on a physical device. `#include?` is xcconfig's native optional
+// include: if apps/ios/signing.xcconfig does not exist, it is silently
+// skipped and simulator builds proceed unsigned.
+//
+// To run on your iPhone, create apps/ios/signing.xcconfig containing
+// exactly one line (your Apple Developer team ID):
+//
+//     DEVELOPMENT_TEAM = ABCDE12345
+//
+#include? "signing.xcconfig"

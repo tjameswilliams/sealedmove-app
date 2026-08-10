@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Keychain access requires SOME code-signing entitlements; without
+	     them SecItemAdd fails with errSecMissingEntitlement (-34018), which
+	     is why simulator builds must be ad-hoc signed (see project.yml). -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)dev.teachmechess.app</string>
+	</array>
+	<!-- App Attest: development builds attest against Apple's development
+	     environment (the register Lambda runs APPATTEST_ALLOW_DEV=1);
+	     App Store / TestFlight distribution flips this to production
+	     automatically. -->
+	<key>com.apple.developer.devicecheck.appattest-environment</key>
+	<string>development</string>
+</dict>
+</plist>

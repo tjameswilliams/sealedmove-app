@@ -1,0 +1,33 @@
+[package]
+name = "coach-ffi"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "UniFFI bindings for coach-core: the Swift/Kotlin FFI surface of the chess coach."
+
+[lib]
+crate-type = ["cdylib", "staticlib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[features]
+# Statically linked Stockfish 11 as the analyst — the iOS engine path (no
+# subprocess spawning allowed there). NOTE: stockfish-embedded is
+# GPL-3.0-only; with this feature on (the default), binaries built from
+# this crate are GPL works — see crates/stockfish-embedded/README.md.
+default = ["embedded-stockfish"]
+embedded-stockfish = ["dep:stockfish-embedded"]
+
+[dependencies]
+coach-core = { path = "../coach-core" }
+stockfish-embedded = { path = "../stockfish-embedded", optional = true }
+# "cli" is only used by the uniffi-bindgen bin target; it does not end up in
+# the cdylib/staticlib artifacts.
+uniffi = { version = "0.29", features = ["cli"] }
+tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }

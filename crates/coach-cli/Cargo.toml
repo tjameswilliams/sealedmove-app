@@ -1,0 +1,22 @@
+[package]
+name = "coach-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Headless CLI and eval harness for the chess coach core."
+
+[[bin]]
+name = "coach"
+path = "src/main.rs"
+
+[dependencies]
+coach-core = { path = "../coach-core" }
+# GPL-3.0-only: linking this makes the coach binary a GPL work (dev tool,
+# not distributed) — see crates/stockfish-embedded/README.md.
+stockfish-embedded = { path = "../stockfish-embedded" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml = "1.1.4"

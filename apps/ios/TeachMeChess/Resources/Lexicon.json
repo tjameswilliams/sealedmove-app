@@ -1,0 +1,892 @@
+[
+  {
+    "slug": "vienna-game",
+    "name": "Vienna Game",
+    "eco": "C25",
+    "category": "opening",
+    "aliases": ["Vienna Opening", "Vienna Defense", "Vienna"],
+    "definition": "White develops the queen's knight before the king's knight (1.e4 e5 2.Nc3), keeping the f-pawn free to advance. It is a flexible cousin of the King's Gambit: White can play a quiet system with Bc4 and d3, or lunge with f4 for a direct attack.",
+    "strengths": [
+      "Keeps the option of a powerful f2–f4 break, unlike 2.Nf3 lines",
+      "Flexible: can steer into quiet or very sharp play",
+      "Less theory than the Italian or Ruy Lopez — good surprise value"
+    ],
+    "weaknesses": [
+      "The knight on c3 blocks the c-pawn, limiting central expansion",
+      "Black equalizes comfortably with the central strike 2…Nf6 and …d5",
+      "The delayed kingside development can leave White's king airy in gambit lines"
+    ],
+    "moves": ["e4", "e5", "Nc3", "Nf6", "Bc4", "Nc6", "d3"],
+    "caption": "White holds back the f-pawn and keeps both attacking plans alive."
+  },
+  {
+    "slug": "vienna-gambit",
+    "name": "Vienna Gambit",
+    "eco": "C29",
+    "category": "opening",
+    "definition": "The sharpest form of the Vienna: after 1.e4 e5 2.Nc3 Nf6, White throws in 3.f4, offering a pawn to rip open the f-file and seize the center. Black's best reply is the counter-strike 3…d5 — taking the pawn with 3…exf4 walks into a strong 4.e5.",
+    "strengths": [
+      "Immediate attacking chances on the f-file and against f7",
+      "Punishes casual play — one slip by Black can be fatal",
+      "White gets a big pawn center in many lines"
+    ],
+    "weaknesses": [
+      "The prepared 3…d5! equalizes and can even turn the tables",
+      "White's king is drafty once the f-pawn leaves home",
+      "Requires accurate follow-up; a half-remembered gambit is just a lost pawn"
+    ],
+    "moves": ["e4", "e5", "Nc3", "Nf6", "f4", "d5", "fxe5", "Nxe4"],
+    "caption": "The main line: Black counters in the center rather than grabbing the pawn."
+  },
+  {
+    "slug": "italian-game",
+    "name": "Italian Game",
+    "eco": "C50",
+    "category": "opening",
+    "aliases": ["Giuoco Piano", "Italian Opening", "Italian"],
+    "definition": "One of the oldest openings on record: 1.e4 e5 2.Nf3 Nc6 3.Bc4 aims the bishop at f7, Black's weakest square. Modern play favors the slow build-up (Giuoco Pianissimo) with c3 and d3, maneuvering behind a stable center.",
+    "strengths": [
+      "Fast, natural development and early castling",
+      "The c4-bishop eyes f7 and supports central breaks",
+      "Rich choice of plans, from quiet maneuvering to the Evans Gambit"
+    ],
+    "weaknesses": [
+      "Well-prepared opponents know the equalizing lines deeply",
+      "The slow lines concede Black a comfortable, solid game",
+      "The bishop can become a target after …Na5 or …b5–b4 expansions"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "c3", "Nf6", "d3"],
+    "caption": "The Pianissimo setup: White builds slowly with c3 and d3."
+  },
+  {
+    "slug": "ruy-lopez",
+    "name": "Ruy Lopez",
+    "eco": "C60",
+    "category": "opening",
+    "aliases": ["Spanish Opening", "Spanish Game", "Ruy López"],
+    "definition": "The Spanish torture: 1.e4 e5 2.Nf3 Nc6 3.Bb5 pressures the knight that defends e5, beginning a long-term squeeze on Black's center. It has been a main battleground of chess theory for five centuries.",
+    "strengths": [
+      "Creates lasting pressure that persists deep into the middlegame",
+      "Enormously flexible — plans exist against every Black setup",
+      "Statistically one of White's highest-scoring 1.e4 openings"
+    ],
+    "weaknesses": [
+      "A huge body of theory: Black has many respectable defenses",
+      "The bishop often gets chased (…a6, …b5) and must retreat with care",
+      "Closed positions demand patient maneuvering, not quick tactics"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O"],
+    "caption": "The main line: the bishop drops back to a4, keeping the tension."
+  },
+  {
+    "slug": "sicilian-defense",
+    "name": "Sicilian Defense",
+    "eco": "B20",
+    "category": "opening",
+    "aliases": ["Sicilian"],
+    "definition": "Black's most combative reply to 1.e4: 1…c5 fights for the center asymmetrically, trading a wing pawn for a central one after d4 cxd4. The imbalanced pawn structure gives both sides winning chances and makes it the highest-scoring defense at every level.",
+    "strengths": [
+      "Unbalances the game — ideal when Black needs to play for a win",
+      "The half-open c-file gives Black natural queenside counterplay",
+      "Vast choice of systems (Najdorf, Dragon, Sveshnikov…) to suit any style"
+    ],
+    "weaknesses": [
+      "Heavy theory: sharp main lines punish the unprepared",
+      "White gets a lead in development and real attacking chances",
+      "Falling behind in the race — Black attacks the queenside, White the king"
+    ],
+    "moves": ["e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3"],
+    "caption": "The Open Sicilian: Black trades the c-pawn for White's d-pawn."
+  },
+  {
+    "slug": "najdorf-variation",
+    "name": "Najdorf Variation",
+    "eco": "B90",
+    "category": "opening",
+    "aliases": ["Najdorf", "Sicilian Najdorf"],
+    "definition": "The Rolls-Royce of the Sicilian: 5…a6 prepares …e5 and …b5 while denying White's pieces the b5 square. A favorite of Fischer and Kasparov, it is arguably the most deeply analyzed opening in chess.",
+    "strengths": [
+      "Maximum flexibility — Black commits to nothing prematurely",
+      "Fights for the initiative, not mere equality",
+      "The …b5 expansion generates automatic queenside play"
+    ],
+    "weaknesses": [
+      "Possibly the most theory-heavy opening in existence",
+      "White has six or more dangerous tries (6.Bg5, 6.Be3, 6.Be2…)",
+      "One move-order slip in the sharp lines can lose on the spot"
+    ],
+    "moves": ["e4", "c5", "Nf3", "d6", "d4", "cxd4", "Nxd4", "Nf6", "Nc3", "a6"],
+    "caption": "5…a6 — a quiet move with a fighting heart."
+  },
+  {
+    "slug": "french-defense",
+    "name": "French Defense",
+    "eco": "C00",
+    "category": "opening",
+    "aliases": ["French"],
+    "definition": "After 1.e4 e6 2.d4 d5, Black builds a solid pawn chain and strikes at White's center with …c5 and …f6 later. The trademark tension: Black accepts a cramped game and a hemmed-in light-squared bishop in exchange for a rock-solid structure and clear counterattacking plans.",
+    "strengths": [
+      "Very solid — hard for White to generate quick threats",
+      "Clear plans: attack the pawn chain's base with …c5 and …f6",
+      "Strong counterattacking potential once the center locks"
+    ],
+    "weaknesses": [
+      "The c8-bishop is notoriously passive ('the French bishop')",
+      "Cramped positions demand patience and precise timing",
+      "White gets easy space and kingside attacking chances in many lines"
+    ],
+    "moves": ["e4", "e6", "d4", "d5", "Nc3", "Nf6", "Bg5"],
+    "caption": "The Classical French: the fight revolves around White's e4 pawn."
+  },
+  {
+    "slug": "caro-kann",
+    "name": "Caro-Kann Defense",
+    "eco": "B10",
+    "category": "opening",
+    "aliases": ["Caro-Kann", "Caro Kann"],
+    "definition": "1…c6 prepares …d5, challenging the center just like the French — but the c8-bishop keeps its diagonal and develops outside the pawn chain before …e6. Renowned as one of the soundest replies to 1.e4, beloved by endgame players.",
+    "strengths": [
+      "Excellent pawn structure that often carries into a favorable endgame",
+      "The light-squared bishop develops actively, unlike in the French",
+      "Low-risk: few forced lines lose material for Black"
+    ],
+    "weaknesses": [
+      "Slightly passive — Black rarely fights for the initiative early",
+      "White chooses the pawn structure (Advance, Exchange, Classical)",
+      "The …c6 pawn takes the knight's best square"
+    ],
+    "moves": ["e4", "c6", "d4", "d5", "Nc3", "dxe4", "Nxe4", "Bf5"],
+    "caption": "The Classical main line: the bishop gets out before …e6."
+  },
+  {
+    "slug": "scandinavian-defense",
+    "name": "Scandinavian Defense",
+    "eco": "B01",
+    "category": "opening",
+    "aliases": ["Scandinavian", "Center Counter", "Center Counter Defense"],
+    "definition": "The most direct challenge to 1.e4: 1…d5 confronts the pawn immediately. After 2.exd5 Qxd5 3.Nc3 the queen usually drops back to a5, and Black follows a simple, sturdy development scheme that sidesteps mountains of theory.",
+    "strengths": [
+      "Forces the structure early — little room for White surprises",
+      "A clear, learnable system: …c6, …Bf5, …e6 almost on autopilot",
+      "Avoids the heavily analyzed 1.e4 e5 and Sicilian jungles"
+    ],
+    "weaknesses": [
+      "The early queen sortie loses time to White's developing moves",
+      "White gets a comfortable edge in space with simple play",
+      "Limited winning chances against precise play — solid but modest"
+    ],
+    "moves": ["e4", "d5", "exd5", "Qxd5", "Nc3", "Qa5", "d4", "Nf6"],
+    "caption": "The main line: the queen relocates to a5 after recapturing."
+  },
+  {
+    "slug": "pirc-defense",
+    "name": "Pirc Defense",
+    "eco": "B07",
+    "category": "opening",
+    "aliases": ["Pirc"],
+    "definition": "A hypermodern defense: Black lets White build a broad pawn center with 1…d6, 2…Nf6 and 3…g6, then strikes at it with pieces and timely pawn breaks (…e5 or …c5). The fianchettoed bishop on g7 is the heart of Black's play.",
+    "strengths": [
+      "Flexible move orders that avoid early commitments",
+      "The g7-bishop exerts long-term pressure on the center",
+      "Counterattacking chances once White overextends"
+    ],
+    "weaknesses": [
+      "Concedes space — White chooses from several dangerous setups",
+      "Requires precise timing of the central breaks",
+      "Passive if Black never achieves …e5 or …c5"
+    ],
+    "moves": ["e4", "d6", "d4", "Nf6", "Nc3", "g6", "Nf3", "Bg7"],
+    "caption": "Black invites the big center, planning to chip away at it."
+  },
+  {
+    "slug": "alekhine-defense",
+    "name": "Alekhine Defense",
+    "eco": "B02",
+    "category": "opening",
+    "aliases": ["Alekhine", "Alekhine's Defense"],
+    "definition": "Pure provocation: 1…Nf6 attacks e4 and dares White to chase the knight with pawns. Black hopes the advanced pawns become targets; White hopes they become a bind. Named for the fourth world champion, who unveiled it in 1921.",
+    "strengths": [
+      "Drags White out of comfortable, well-known structures",
+      "White's advanced pawns can become long-term weaknesses",
+      "Great practical weapon against players who overextend"
+    ],
+    "weaknesses": [
+      "The knight loses time hopping around under fire",
+      "If the big center holds, Black is simply cramped",
+      "The Exchange and Four Pawns lines demand accurate defense"
+    ],
+    "moves": ["e4", "Nf6", "e5", "Nd5", "d4", "d6", "Nf3"],
+    "caption": "The Modern line: White grabs space, Black prepares to undermine it."
+  },
+  {
+    "slug": "petrov-defense",
+    "name": "Petrov Defense",
+    "eco": "C42",
+    "category": "opening",
+    "aliases": ["Petrov", "Petroff", "Petroff Defense", "Russian Game", "Russian Defense"],
+    "definition": "Instead of defending the e5 pawn, Black counterattacks e4 with 2…Nf6 — a mirror-image standoff. The Petrov's symmetry has earned it a drawish reputation, but it is a supremely reliable equalizer at the highest level.",
+    "strengths": [
+      "Rock-solid: one of the most reliable equalizers against 1.e4",
+      "Sidesteps the Ruy Lopez and Italian entirely",
+      "Clean piece play with few structural weaknesses"
+    ],
+    "weaknesses": [
+      "Symmetrical positions offer few winning chances for Black",
+      "Some forcing lines lead straight to sterile equality",
+      "The trap 3.Nxe5 Nxe4? (instead of 3…d6!) loses material"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nf6", "Nxe5", "d6", "Nf3", "Nxe4"],
+    "caption": "The key finesse: 3…d6 first, and only then …Nxe4."
+  },
+  {
+    "slug": "scotch-game",
+    "name": "Scotch Game",
+    "eco": "C45",
+    "category": "opening",
+    "aliases": ["Scotch", "Scotch Opening"],
+    "definition": "White breaks the central tension at once: 1.e4 e5 2.Nf3 Nc6 3.d4 exd4 4.Nxd4 trades pawns to gain free piece play and a small but lasting spatial edge. Kasparov revived it as a serious alternative to the Ruy Lopez in the 1990s.",
+    "strengths": [
+      "Open lines and clear development from move four",
+      "Avoids the immense theory of the Ruy Lopez",
+      "White's central knight and half-open lines give easy plans"
+    ],
+    "weaknesses": [
+      "Releases the central tension early — Black gets free development too",
+      "The main lines (…Bc5, …Nf6) are well mapped and equal",
+      "Little scope for a slow squeeze; the position opens whether you like it or not"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nc6", "d4", "exd4", "Nxd4"],
+    "caption": "White trades the d-pawn to plant a knight in the center."
+  },
+  {
+    "slug": "four-knights-game",
+    "name": "Four Knights Game",
+    "eco": "C47",
+    "category": "opening",
+    "aliases": ["Four Knights"],
+    "definition": "All four knights come out before anything else: 1.e4 e5 2.Nf3 Nc6 3.Nc3 Nf6. A classical, symmetric development scheme prized for its safety — and, in the Spanish variation 4.Bb5, capable of real venom.",
+    "strengths": [
+      "Sound, principled development with a safe king",
+      "Easy to learn — a fine first opening repertoire",
+      "The Spanish (4.Bb5) and Scotch (4.d4) versions keep real bite"
+    ],
+    "weaknesses": [
+      "Symmetry can drift toward dry equality",
+      "Black has comfortable, well-known paths to level play",
+      "Few surprise weapons for an ambitious White player"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nc6", "Nc3", "Nf6", "Bb5", "Bb4"],
+    "caption": "The Spanish Four Knights — symmetry with a sting."
+  },
+  {
+    "slug": "kings-gambit",
+    "name": "King's Gambit",
+    "eco": "C30",
+    "category": "opening",
+    "definition": "The romantic era in a single move: 1.e4 e5 2.f4 offers a pawn to deflect Black's e-pawn, seize the center with d4, and pry open the f-file against f7. Once the main event of 19th-century chess, it remains a fearsome surprise weapon.",
+    "strengths": [
+      "Immediate initiative and ferocious attacking chances",
+      "Opponents rarely know the defensive theory as well as the gambiteer",
+      "Rich tactical play from move two — ideal for sharpening tactics"
+    ],
+    "weaknesses": [
+      "Objectively Black can keep the pawn and equalize (or better) with accuracy",
+      "White's king is permanently drafty on the e1–h4 diagonal",
+      "A misplayed attack leaves White simply a pawn down"
+    ],
+    "moves": ["e4", "e5", "f4", "exf4", "Nf3", "g5"],
+    "caption": "The Accepted main line: Black grabs the pawn and clings to it with …g5."
+  },
+  {
+    "slug": "evans-gambit",
+    "name": "Evans Gambit",
+    "eco": "C51",
+    "category": "opening",
+    "definition": "A pawn sacrifice inside the Italian Game: 4.b4!? deflects the c5-bishop so White gains the center with c3 and d4 at double speed. A favorite of Morphy and revived by Kasparov — the pawn buys two tempi and open lines.",
+    "strengths": [
+      "Buys two full tempi for rapid central expansion",
+      "Deeply unpleasant for unprepared opponents",
+      "Attacking chances persist even into the endgame"
+    ],
+    "weaknesses": [
+      "Declining with 4…Bb6 keeps things solid for Black",
+      "If the attack fizzles, White is just a pawn down",
+      "Modern defenses have blunted the sharpest lines"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "b4", "Bxb4", "c3", "Ba5", "d4"],
+    "caption": "The b-pawn is bait: White builds a huge center with tempo."
+  },
+  {
+    "slug": "fried-liver-attack",
+    "name": "Fried Liver Attack",
+    "eco": "C57",
+    "category": "opening",
+    "aliases": ["Fried Liver", "Fegatello Attack", "Fegatello"],
+    "definition": "The most famous piece sacrifice in beginner chess: after 4.Ng5 d5 5.exd5 Nxd5?! White plays 6.Nxf7!, dragging the black king into the open. Black's 5…Nxd5 is the mistake that allows it — 5…Na5 (the main line) avoids the whole thing.",
+    "strengths": [
+      "A raging attack that is very hard to defend over the board",
+      "Even surviving Black kings stay weak for the whole game",
+      "Teaches attacking fundamentals: king in the center, every piece invited"
+    ],
+    "weaknesses": [
+      "Only works if Black cooperates with 5…Nxd5 (5…Na5! sidesteps it)",
+      "Objectively unclear — precise defense holds with the extra piece",
+      "Burning your bridges: no attack, no compensation"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nc6", "Bc4", "Nf6", "Ng5", "d5", "exd5", "Nxd5", "Nxf7", "Kxf7", "Qf3+", "Ke6", "Nc3"],
+    "caption": "The king is dragged to e6 — and the whole army joins the hunt."
+  },
+  {
+    "slug": "danish-gambit",
+    "name": "Danish Gambit",
+    "eco": "C21",
+    "category": "opening",
+    "definition": "White offers not one but two pawns — 1.e4 e5 2.d4 exd4 3.c3 dxc3 4.Bc4 cxb2 5.Bxb2 — for a pair of raking bishops aimed straight at Black's kingside. Pure attacking chess from the romantic tradition.",
+    "strengths": [
+      "Both bishops bear down on the kingside from move five",
+      "Development lead turns careless play into quick mates",
+      "Simple attacking plans that are fun to play"
+    ],
+    "weaknesses": [
+      "Two pawns is real material — a defused attack loses the endgame",
+      "The counter-gambit …d5 returns a pawn and equalizes comfortably",
+      "Rarely seen above club level for good reason"
+    ],
+    "moves": ["e4", "e5", "d4", "exd4", "c3", "dxc3", "Bc4", "cxb2", "Bxb2"],
+    "caption": "Two pawns for two monster bishops on the long diagonals."
+  },
+  {
+    "slug": "queens-gambit",
+    "name": "Queen's Gambit",
+    "eco": "D06",
+    "category": "opening",
+    "definition": "The cornerstone of 1.d4 chess: 2.c4 offers a wing pawn to deflect Black's d5-pawn and claim the full center. It is not a true gambit — White always regains the pawn — which is why it has anchored elite repertoires for over a century.",
+    "strengths": [
+      "Fights for the center with no real material risk",
+      "Leads to rich, strategically deep middlegames",
+      "Sound at every level, from first tournament to world championship"
+    ],
+    "weaknesses": [
+      "Black's solid setups (Slav, QGD) are hard nuts to crack",
+      "Strategic positions punish players who only know tactics",
+      "The theory of the main lines runs deep"
+    ],
+    "moves": ["d4", "d5", "c4", "e6"],
+    "caption": "The c-pawn asks a question; declining with 2…e6 is the classical answer."
+  },
+  {
+    "slug": "queens-gambit-declined",
+    "name": "Queen's Gambit Declined",
+    "eco": "D30",
+    "category": "opening",
+    "aliases": ["QGD"],
+    "definition": "Black meets the Queen's Gambit by reinforcing d5 with 2…e6, keeping the central pawn duo intact at the cost of temporarily shutting in the c8-bishop. One of the most trusted defenses in chess history — the battleground of countless world-championship matches.",
+    "strengths": [
+      "Supremely solid central structure",
+      "Clear classical plans: …c5 or the …dxc4 and …e5 freeing breaks",
+      "Trusted at world-championship level for 150 years"
+    ],
+    "weaknesses": [
+      "The c8-bishop starts badly hemmed in",
+      "White enjoys a small, nagging space advantage",
+      "Passive play can leave Black defending for hours"
+    ],
+    "moves": ["d4", "d5", "c4", "e6", "Nc3", "Nf6", "Bg5", "Be7", "e3", "O-O", "Nf3"],
+    "caption": "The Orthodox setup: Black is cramped but has no weaknesses."
+  },
+  {
+    "slug": "queens-gambit-accepted",
+    "name": "Queen's Gambit Accepted",
+    "eco": "D20",
+    "category": "opening",
+    "aliases": ["QGA"],
+    "definition": "Black takes the pawn — 2…dxc4 — not to keep it, but to give up the center temporarily and hit back at White's d4 with …c5. A dynamic, respectable choice that trades central presence for free piece play.",
+    "strengths": [
+      "Unopposed development for the light-squared bishop",
+      "The thematic …c5 counter gives Black active piece play",
+      "Less theory than the main-line Declined complexes"
+    ],
+    "weaknesses": [
+      "Trying to keep the c4 pawn with …b5? backfires badly",
+      "White gets a strong center and a lead in development",
+      "Black must know the precise equalizing sequences"
+    ],
+    "moves": ["d4", "d5", "c4", "dxc4", "Nf3", "Nf6", "e3", "e6", "Bxc4", "c5"],
+    "caption": "Black returns the pawn and strikes at d4 with …c5."
+  },
+  {
+    "slug": "slav-defense",
+    "name": "Slav Defense",
+    "eco": "D10",
+    "category": "opening",
+    "aliases": ["Slav"],
+    "definition": "The other great answer to the Queen's Gambit: 2…c6 supports d5 without blocking the c8-bishop, fixing the QGD's one drawback. The price is that the c6-pawn takes the queen knight's natural square.",
+    "strengths": [
+      "Keeps the light-squared bishop's diagonal open — the Slav's whole point",
+      "Extremely resilient pawn structure",
+      "Can take the c4 pawn at a good moment and fight to keep it"
+    ],
+    "weaknesses": [
+      "The b8-knight loses its best square to the c6-pawn",
+      "Main lines are heavily analyzed and often razor-sharp",
+      "The solid lines give White a persistent initiative to defend against"
+    ],
+    "moves": ["d4", "d5", "c4", "c6", "Nf3", "Nf6", "Nc3", "dxc4"],
+    "caption": "…c6 props up d5 while the c8-bishop keeps its view."
+  },
+  {
+    "slug": "london-system",
+    "name": "London System",
+    "eco": "D02",
+    "category": "opening",
+    "aliases": ["London"],
+    "definition": "A complete White setup rather than a single line: d4, Nf3, Bf4 (the bishop out before e3), then e3, c3, Bd3 and Nbd2 — the same solid pyramid against almost anything Black plays. Its reliability has made it hugely popular from club level to elite rapid play.",
+    "strengths": [
+      "One setup covers nearly every Black defense — minimal memorization",
+      "Rock-solid structure with a clear kingside attacking plan",
+      "The f4-bishop develops actively before the pawn chain closes"
+    ],
+    "weaknesses": [
+      "Low pressure: well-prepared Black players equalize comfortably",
+      "Can drift into passivity if played on autopilot",
+      "The early …c5 and …Qb6 setups target the b2-pawn annoyingly"
+    ],
+    "moves": ["d4", "d5", "Nf3", "Nf6", "Bf4", "e6", "e3", "Bd6", "Bg3"],
+    "caption": "The trademark pyramid: pawns on d4/e3/c3, bishop breathing on g3."
+  },
+  {
+    "slug": "kings-indian-defense",
+    "name": "King's Indian Defense",
+    "eco": "E60",
+    "category": "opening",
+    "aliases": ["King's Indian", "KID"],
+    "definition": "The ultimate counterattacking defense to 1.d4: Black concedes the whole center, fianchettos on g7, castles, and then detonates it with …e5 or …c5. In the classical main lines the board splits in two — White storms the queenside while Black mates on the kingside.",
+    "strengths": [
+      "Unmatched winning chances as Black — the kingside attack plays itself",
+      "The g7-bishop is a monster once the center opens",
+      "Thematic plans (…f5–f4, …g5–g4) survive move-order tricks"
+    ],
+    "weaknesses": [
+      "White's queenside play is faster on paper — one tempo matters",
+      "Serious space disadvantage if the attack never lands",
+      "The Bayonet and Sämisch lines demand deep preparation"
+    ],
+    "moves": ["d4", "Nf6", "c4", "g6", "Nc3", "Bg7", "e4", "d6", "Nf3", "O-O"],
+    "caption": "Black hands White the center — and plans to blow it up."
+  },
+  {
+    "slug": "nimzo-indian-defense",
+    "name": "Nimzo-Indian Defense",
+    "eco": "E20",
+    "category": "opening",
+    "aliases": ["Nimzo-Indian", "Nimzo"],
+    "definition": "Nimzowitsch's masterpiece: 3…Bb4 pins the c3-knight, fighting for the e4 square with pieces instead of pawns. Black often trades the bishop to saddle White with doubled c-pawns — a strategic battle of bishop pair versus structure.",
+    "strengths": [
+      "Controls e4 from move three without weakening anything",
+      "The doubled-pawn trade gives a clear long-term target",
+      "Flexible: Black chooses between many pawn structures"
+    ],
+    "weaknesses": [
+      "Giving up the dark-squared bishop can hurt in open positions",
+      "White's bishop pair is real compensation for the structure",
+      "So respected that White often dodges it with 3.Nf3 or 3.g3"
+    ],
+    "moves": ["d4", "Nf6", "c4", "e6", "Nc3", "Bb4"],
+    "caption": "The pin on c3 stakes a claim to e4 with pieces, not pawns."
+  },
+  {
+    "slug": "queens-indian-defense",
+    "name": "Queen's Indian Defense",
+    "eco": "E12",
+    "category": "opening",
+    "aliases": ["Queen's Indian", "QID"],
+    "definition": "The Nimzo-Indian's quieter sibling: when White avoids Nc3 with 3.Nf3, Black fianchettos the queen's bishop with 3…b6, controlling the central light squares e4 and d5 from long range. Sound, flexible, and strategically rich.",
+    "strengths": [
+      "The b7-bishop watches e4 without any structural concession",
+      "Very solid — few forcing lines to memorize",
+      "Pairs perfectly with the Nimzo for a complete repertoire"
+    ],
+    "weaknesses": [
+      "Somewhat passive; White dictates the pace",
+      "The fianchetto line 4.g3 neutralizes the b7-bishop",
+      "Winning chances come slowly against accurate play"
+    ],
+    "moves": ["d4", "Nf6", "c4", "e6", "Nf3", "b6", "g3", "Bb7", "Bg2"],
+    "caption": "Both long diagonals occupied: a duel of fianchettoed bishops."
+  },
+  {
+    "slug": "grunfeld-defense",
+    "name": "Grünfeld Defense",
+    "eco": "D80",
+    "category": "opening",
+    "aliases": ["Grunfeld", "Gruenfeld", "Grünfeld"],
+    "definition": "Hypermodern counterattack at full throttle: 3…d5 invites White to build the broadest possible center with cxd5 and e4, then batters it with …Bg7, …c5 and the half-open d-file. Kasparov's and Fischer's weapon of choice against 1.d4.",
+    "strengths": [
+      "Piece activity that borders on the violent — every move hits the center",
+      "The g7-bishop rakes the a1–h8 diagonal all game",
+      "Well-timed …c5 breaks leave White's center hanging by a thread"
+    ],
+    "weaknesses": [
+      "If the big center holds, it simply rolls forward and wins",
+      "Extremely theory-dependent in the Exchange main lines",
+      "Small inaccuracies leave Black with no center and no play"
+    ],
+    "moves": ["d4", "Nf6", "c4", "g6", "Nc3", "d5", "cxd5", "Nxd5", "e4", "Nxc3", "bxc3", "Bg7"],
+    "caption": "White gets the dream center; Black gets the pieces to demolish it."
+  },
+  {
+    "slug": "dutch-defense",
+    "name": "Dutch Defense",
+    "eco": "A80",
+    "category": "opening",
+    "aliases": ["Dutch"],
+    "definition": "Black answers 1.d4 with the mirror of the King's Gambit idea: 1…f5 grabs the e4 square and signals a kingside attack from move one. The Leningrad (…g6), Stonewall (…d5, …e6, …f5 wall) and Classical setups offer three very different personalities.",
+    "strengths": [
+      "Immediate imbalance — excellent for must-win games",
+      "Clear attacking blueprint: …f5, …Ne4, rook lifts",
+      "The Stonewall's grip on e4 can smother White completely"
+    ],
+    "weaknesses": [
+      "1…f5 weakens the king's diagonal forever (the e1–h4 check!)",
+      "Early gambits like 2.e4!? are genuinely dangerous",
+      "The e6/e5 holes and the bad Stonewall bishop are permanent"
+    ],
+    "moves": ["d4", "f5", "g3", "Nf6", "Bg2", "e6", "Nf3"],
+    "caption": "…f5 stakes out e4 and announces kingside intentions."
+  },
+  {
+    "slug": "english-opening",
+    "name": "English Opening",
+    "eco": "A10",
+    "category": "opening",
+    "aliases": ["English"],
+    "definition": "1.c4 fights for the center from the wing — often transposing into d4 openings, or standing alone as a 'reversed Sicilian' with an extra tempo. A favorite of positional players who prefer maneuvering to memorized tactics.",
+    "strengths": [
+      "Immensely flexible — transposes into many systems on White's terms",
+      "Reversed-Sicilian structures with an extra tempo",
+      "Sidesteps sharp preparation against 1.e4 and 1.d4"
+    ],
+    "weaknesses": [
+      "Less immediate central presence — Black can grab it with …e5, …d5",
+      "Demands understanding of many structures, not one system",
+      "Symmetrical lines (1…c5) can be hard to crack"
+    ],
+    "moves": ["c4", "e5", "Nc3", "Nf6", "g3", "d5", "cxd5", "Nxd5", "Bg2"],
+    "caption": "A Sicilian with colors reversed — and a whole tempo in the bank."
+  },
+  {
+    "slug": "reti-opening",
+    "name": "Réti Opening",
+    "eco": "A04",
+    "category": "opening",
+    "aliases": ["Reti", "Reti Opening"],
+    "definition": "The hypermodern flagship: 1.Nf3 and 2.c4 attack Black's d5-pawn from the flanks while both bishops prepare to fianchetto. Richard Réti used it to defeat Capablanca in 1924 — the world champion's first loss in eight years.",
+    "strengths": [
+      "Avoids early commitments; White reveals nothing",
+      "Pressure on the long diagonals builds naturally",
+      "Nearly immune to sharp preparation"
+    ],
+    "weaknesses": [
+      "Grants Black central space that solid setups keep",
+      "Plans are subtle — easy to drift without understanding",
+      "Black equalizes with sensible classical development"
+    ],
+    "moves": ["Nf3", "d5", "c4", "e6", "g3", "Nf6", "Bg2"],
+    "caption": "The center is attacked from the wings, never occupied."
+  },
+  {
+    "slug": "catalan-opening",
+    "name": "Catalan Opening",
+    "eco": "E00",
+    "category": "opening",
+    "aliases": ["Catalan"],
+    "definition": "Queen's Gambit structure plus a kingside fianchetto: the g2-bishop bears down the long diagonal at Black's queenside for the entire game. A slow-burn squeeze beloved by Kramnik and Carlsen — Black is rarely lost, but rarely comfortable.",
+    "strengths": [
+      "The Catalan bishop pressures b7/c6/d5 for hours",
+      "Endgames stay pleasant for White remarkably often",
+      "Low risk, persistent pull — ideal grinding weapon"
+    ],
+    "weaknesses": [
+      "Black can grab c4 and force White to prove compensation",
+      "Slow buildup gives well-prepared defenders time to untangle",
+      "Little immediate attack; patience is mandatory"
+    ],
+    "moves": ["d4", "Nf6", "c4", "e6", "g3", "d5", "Bg2", "Be7", "Nf3", "O-O"],
+    "caption": "A Queen's Gambit wearing a fianchetto — the g2-bishop is the star."
+  },
+  {
+    "slug": "benoni-defense",
+    "name": "Benoni Defense",
+    "eco": "A56",
+    "category": "opening",
+    "aliases": ["Benoni", "Modern Benoni"],
+    "definition": "Black lures White's d-pawn forward with 1…Nf6 and 2…c5 3.d5 e6, then trades on d5 to create a lopsided structure: White owns the center, Black owns the queenside majority and the half-open e-file. Tal's favorite hunting ground.",
+    "strengths": [
+      "Dynamic imbalance with genuine winning chances for Black",
+      "The queenside pawn majority is a long-term endgame trump",
+      "The g7-bishop and e-file pressure fuel constant tactics"
+    ],
+    "weaknesses": [
+      "White's central majority can simply roll with e4–e5",
+      "The Taimanov and Flick-Knife attacks are theoretically critical",
+      "Every tempo matters — passive moves lose outright"
+    ],
+    "moves": ["d4", "Nf6", "c4", "c5", "d5", "e6", "Nc3", "exd5", "cxd5", "d6"],
+    "caption": "A lopsided bargain: central majority versus queenside majority."
+  },
+  {
+    "slug": "kings-indian-attack",
+    "name": "King's Indian Attack",
+    "eco": "A07",
+    "category": "opening",
+    "aliases": ["KIA"],
+    "definition": "A complete White system: Nf3, g3, Bg2, O-O, d3, Nbd2, then the space-gaining e4–e5 wedge and a slow kingside pawn storm. Fischer used it to score crushing wins — the same plan works against almost any Black setup.",
+    "strengths": [
+      "One universal plan — setup first, opponent's moves second",
+      "The e5 wedge cramps Black and anchors a kingside attack",
+      "The fianchettoed king is extremely hard to counterattack"
+    ],
+    "weaknesses": [
+      "Black's queenside counterplay arrives fast in open lines",
+      "Concedes the early initiative — a race, not a squeeze",
+      "Predictability: prepared opponents know the antidotes"
+    ],
+    "moves": ["Nf3", "d5", "g3", "c5", "Bg2", "Nc6", "O-O", "e5", "d3"],
+    "caption": "The same fortress every game — then the kingside avalanche."
+  },
+  {
+    "slug": "fork",
+    "name": "Fork",
+    "category": "tactic",
+    "aliases": ["forked", "forking", "double attack", "family fork", "royal fork"],
+    "definition": "One piece attacks two or more enemy targets at the same time — the defender can only save one. Knights are the classic forkers because their attacks can't be blocked, and a fork that hits the king forces the reply, making the win of material automatic.",
+    "strengths": [
+      "Wins material by force when one target is the king",
+      "Knight forks are invisible to players who only watch lines"
+    ],
+    "weaknesses": [
+      "A fork on two defended pieces wins nothing — check the landing square",
+      "Setting one up often telegraphs the idea a move early"
+    ],
+    "startFen": "r3k3/8/8/3N4/8/8/8/4K3 w - - 0 1",
+    "moves": ["Nc7+", "Kd7", "Nxa8"],
+    "caption": "The royal fork: check first, collect the rook second."
+  },
+  {
+    "slug": "pin",
+    "name": "Pin",
+    "category": "tactic",
+    "aliases": ["pinned", "pinning", "absolute pin", "relative pin"],
+    "definition": "A piece is pinned when moving it would expose a more valuable piece behind it on the same line. Against the king the pin is absolute — moving the pinned piece is illegal. A pinned piece is a paralyzed piece: attack it again, or simply ignore it as a defender.",
+    "strengths": [
+      "Neutralizes a defender without capturing it",
+      "Piling up on a pinned piece often wins it outright"
+    ],
+    "weaknesses": [
+      "Relative pins can be broken by a strong enough counter-threat",
+      "The pinning piece is itself tied down while it holds the pin"
+    ],
+    "moves": ["d4", "Nf6", "c4", "e6", "Nc3", "d5", "Bg5"],
+    "caption": "Bg5 pins the f6-knight against the queen — it no longer truly defends d5."
+  },
+  {
+    "slug": "skewer",
+    "name": "Skewer",
+    "category": "tactic",
+    "aliases": ["skewered", "skewering"],
+    "definition": "The pin's reverse: a valuable piece is attacked and forced to move, exposing a lesser piece behind it on the same line to capture. Skewers through the king are the deadliest — the move is forced, and whatever hides behind falls.",
+    "strengths": [
+      "The front piece must move — the gain is forced",
+      "Devastating in endgames where kings and rooks share lines"
+    ],
+    "weaknesses": [
+      "Needs an open line; one blocker defuses it",
+      "The targets must actually be aligned — engineering that is the hard part"
+    ],
+    "startFen": "1q6/8/8/4k3/8/6P1/8/2B1K3 w - - 0 1",
+    "moves": ["Bf4+", "Kd5", "Bxb8"],
+    "caption": "Check drives the king aside — the queen behind it is taken."
+  },
+  {
+    "slug": "discovered-attack",
+    "name": "Discovered Attack",
+    "category": "tactic",
+    "aliases": ["discovered check", "discovery", "double check"],
+    "definition": "Moving one piece unmasks an attack from another behind it — so the moving piece is free to create a second threat anywhere on the board. When the unmasked attack is check, the opponent must answer the check and the moving piece's threat lands untouched.",
+    "strengths": [
+      "Two threats from one move — the defender can rarely meet both",
+      "Discovered check makes the front piece effectively invincible for a move"
+    ],
+    "weaknesses": [
+      "Requires a battery to be assembled in advance",
+      "An alert opponent will trade off or block the masked piece early"
+    ],
+    "startFen": "3r4/6k1/8/4N3/8/8/1B6/4K3 w - - 0 1",
+    "moves": ["Nc6+", "Kf7", "Nxd8+"],
+    "caption": "The knight steps away with tempo — the bishop's check pays for the rook."
+  },
+  {
+    "slug": "back-rank-mate",
+    "name": "Back-Rank Mate",
+    "category": "tactic",
+    "aliases": ["back rank", "back-rank weakness", "back rank weakness"],
+    "definition": "A rook or queen delivers mate along the opponent's home rank when the castled king is fenced in by its own pawns. The standard insurance is 'luft' — pushing a pawn one square (h3/h6) to give the king an escape hatch.",
+    "strengths": [
+      "Decides countless games — the most common mating pattern in club chess",
+      "The mere threat ties enemy rooks to passive back-rank duty"
+    ],
+    "weaknesses": [
+      "One tempo of luft (h3/h6) removes the threat forever",
+      "Counting defenders wrong on the back rank loses a rook for nothing"
+    ],
+    "startFen": "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1",
+    "moves": ["Ra8#"],
+    "caption": "The pawns that sheltered the king become its prison bars."
+  },
+  {
+    "slug": "smothered-mate",
+    "name": "Smothered Mate",
+    "category": "tactic",
+    "aliases": ["smothered"],
+    "definition": "A lone knight mates a king completely boxed in by its own pieces. In the full classic (Philidor's legacy), the queen is sacrificed on g8 to force the rook to smother its own king — then the knight delivers the famous blow.",
+    "strengths": [
+      "The knight's unblockable attack is the only piece that can do this",
+      "The queen-sacrifice version is completely forcing once it starts"
+    ],
+    "weaknesses": [
+      "Requires the king's escape squares to be exactly occupied",
+      "Spot the pattern too late and the sacrifice is just lost material"
+    ],
+    "startFen": "6rk/6pp/8/4N3/8/8/8/6K1 w - - 0 1",
+    "moves": ["Nf7#"],
+    "caption": "Every escape square taken by the king's own guards."
+  },
+  {
+    "slug": "en-passant",
+    "name": "En Passant",
+    "category": "concept",
+    "aliases": ["en passant capture"],
+    "definition": "When a pawn advances two squares and lands beside an enemy pawn, that pawn may capture it 'in passing' — as if it had moved only one square. The right exists only on the very next move; wait a turn and it is gone forever.",
+    "strengths": [
+      "Stops a two-square push from safely slipping past your pawns"
+    ],
+    "weaknesses": [
+      "Use it or lose it — the option expires after one move",
+      "It is still a pawn trade; capturing can wreck your own structure"
+    ],
+    "moves": ["e4", "Nf6", "e5", "d5", "exd6"],
+    "caption": "The d-pawn tried to sneak past — the e5 pawn takes it in passing."
+  },
+  {
+    "slug": "castling",
+    "name": "Castling",
+    "category": "concept",
+    "aliases": ["castle", "castled", "castling short", "castling long", "kingside castle", "queenside castle"],
+    "definition": "The only move where two pieces move at once: the king slides two squares toward a rook and the rook hops over it. It tucks the king behind a pawn shield and activates the rook in one tempo — but only if neither piece has moved, no piece stands between them, and the king never crosses an attacked square.",
+    "strengths": [
+      "King safety and rook activation in a single move",
+      "Early castling frees the rooks to fight for the central files"
+    ],
+    "weaknesses": [
+      "Castling into a pawn storm can be worse than staying central",
+      "The castled structure must stay intact — every pawn move loosens it"
+    ],
+    "moves": ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "O-O"],
+    "caption": "Two pieces, one move: the king finds shelter, the rook finds work."
+  },
+  {
+    "slug": "fianchetto",
+    "name": "Fianchetto",
+    "category": "concept",
+    "aliases": ["fianchettoed", "fianchettoing"],
+    "definition": "Developing a bishop to the long diagonal (g2/b2 for White, g7/b7 for Black) behind a one-square knight-pawn push. The fianchettoed bishop influences the center from a distance and shields its own king — the backbone of every 'Indian' and hypermodern system.",
+    "strengths": [
+      "The bishop hits the center and both wings from one safe square",
+      "Makes an excellent long-term defender of the castled king"
+    ],
+    "weaknesses": [
+      "Trade off the fianchettoed bishop and the color-square holes around the king become fatal",
+      "One tempo slower than developing the bishop directly"
+    ],
+    "moves": ["Nf3", "d5", "g3", "Nf6", "Bg2", "g6", "O-O", "Bg7"],
+    "caption": "Both sides tuck a bishop into the long diagonal's pocket."
+  },
+  {
+    "slug": "scholars-mate",
+    "name": "Scholar's Mate",
+    "category": "tactic",
+    "aliases": ["scholars mate", "four move checkmate", "four-move checkmate"],
+    "definition": "The four-move mate every player must meet once: queen and bishop gang up on f7, the one square only the king defends. Easily refuted — block with …g6 (meeting Qh5) or develop with …Qe7/…Nh6 — after which the early queen becomes a target and White loses time retreating.",
+    "strengths": [
+      "Wins instantly against players who don't know the defense"
+    ],
+    "weaknesses": [
+      "Refuted by simple developing moves — then the queen gets chased with tempo",
+      "Teaches bad habits: early queen sorties break opening principles"
+    ],
+    "moves": ["e4", "e5", "Bc4", "Nc6", "Qh5", "Nf6", "Qxf7#"],
+    "caption": "Queen and bishop converge on f7 — 3…Nf6?? walked into it (3…g6 defends)."
+  },
+  {
+    "slug": "passed-pawn",
+    "name": "Passed Pawn",
+    "category": "concept",
+    "aliases": ["passed pawns", "passer", "outside passed pawn"],
+    "definition": "A pawn with no enemy pawn ahead of it on its own or adjacent files — nothing can stop it by pawn means alone. 'A passed pawn is a criminal that must be kept under lock and key': it ties enemy pieces to blockade duty and decides most endgames.",
+    "strengths": [
+      "Forces the opponent to spend a whole piece on blockade duty",
+      "Grows stronger every trade — decisive in most pawn endgames"
+    ],
+    "weaknesses": [
+      "A firmly blockaded passer can become a mere bystander",
+      "Pushing it too early can leave it loose and lost"
+    ],
+    "startFen": "8/5kp1/8/2P5/8/8/6K1/8 w - - 0 1",
+    "moves": ["c6", "Ke7", "c7", "Kd7", "c8=Q+"],
+    "caption": "No pawn can stop it — the king arrives one square too late."
+  },
+  {
+    "slug": "zugzwang",
+    "name": "Zugzwang",
+    "category": "concept",
+    "definition": "German for 'compulsion to move': a position where every legal move makes things worse, and the obligation to move — normally a privilege — becomes the losing burden. The cornerstone of king-and-pawn endgames, where 'losing a tempo' to hand the opponent the move is a winning technique.",
+    "strengths": [
+      "Wins 'unwinnable' endgames where no direct threat exists"
+    ],
+    "weaknesses": [
+      "Almost exclusively an endgame weapon — spare moves abound earlier"
+    ],
+    "caption": null
+  },
+  {
+    "slug": "tempo",
+    "name": "Tempo",
+    "category": "concept",
+    "aliases": ["tempi", "gaining a tempo", "losing a tempo", "with tempo"],
+    "definition": "One move as a unit of time. You 'gain a tempo' by developing with a threat — the opponent must respond instead of pursuing their own plan — and 'lose a tempo' by moving the same piece twice for nothing. Three tempi are traditionally worth about a pawn in open positions.",
+    "strengths": [
+      "Threat-driven development builds an initiative move by move"
+    ],
+    "weaknesses": [
+      "Chasing tempo gains with pointless checks can misplace your own pieces"
+    ],
+    "caption": null
+  },
+  {
+    "slug": "outpost",
+    "name": "Outpost",
+    "category": "concept",
+    "aliases": ["outposts", "outpost square"],
+    "definition": "A square in enemy territory, protected by your pawn, that no enemy pawn can ever attack. A knight planted on an outpost is often worth a rook's exchange — it dominates from a home the opponent cannot evict it from by pawn means.",
+    "strengths": [
+      "A permanently anchored piece radiates influence all game",
+      "Knights on central outposts often outweigh bishops entirely"
+    ],
+    "weaknesses": [
+      "An outpost far from the action is just a pretty square",
+      "The occupying piece can still be traded off — have a recapture ready"
+    ],
+    "startFen": "3r2k1/p4ppp/1p6/3N4/4P3/8/PPP2PPP/3R2K1 w - - 0 1",
+    "caption": "The d5-knight: defended by its pawn, and no enemy pawn can ever chase it."
+  }
+]
