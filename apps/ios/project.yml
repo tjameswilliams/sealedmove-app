@@ -47,7 +47,13 @@ targets:
         # HTTPS-only networking -> exempt encryption; declaring it here
         # skips the export-compliance question on every upload.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
-        CURRENT_PROJECT_VERSION: 1
+        # App Store validation requires explicit orientations (error 90474).
+        # The docked board/coach layout is portrait-by-design; on iPad it
+        # runs full-screen portrait rather than untested multitasking sizes.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
+        CURRENT_PROJECT_VERSION: 2
         MARKETING_VERSION: "0.1.0"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"

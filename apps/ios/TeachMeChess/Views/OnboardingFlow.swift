@@ -401,9 +401,9 @@ private struct PlanChoicePage: View {
                 freeCard
                     .modifier(SlideIn(appeared: appeared, delay: 0.4))
 
-                Text("After the trial, Pro Coach is \(price ?? "$5.99")/month — auto-renews until cancelled in your App Store settings. Subscribe, restore, or switch coaches anytime in Settings.")
+                Text("Pro Coach is \(price ?? "$5.99")/month, billed after the 7-day free trial. Auto-renews until cancelled in your App Store settings. Subscribe, restore, or switch coaches anytime in Settings.")
                     .font(.caption)
-                    .foregroundStyle(OnboardingFlow.paper.opacity(0.55))
+                    .foregroundStyle(OnboardingFlow.paper.opacity(0.7))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
                     .modifier(SlideIn(appeared: appeared, delay: 0.55))
@@ -431,24 +431,27 @@ private struct PlanChoicePage: View {
 
     private var trialCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Pro Coach", systemImage: "graduationcap.fill")
-                    .font(.headline)
-                    .foregroundStyle(OnboardingFlow.paper)
-                Spacer()
-                Text("7-DAY FREE TRIAL")
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Brand.annotation, in: Capsule())
-                    .foregroundStyle(.white)
-            }
+            Label("Pro Coach", systemImage: "graduationcap.fill")
+                .font(.headline)
+                .foregroundStyle(OnboardingFlow.paper)
             benefit("Our sharpest coaching, powered by cloud AI")
             benefit("Deeper explanations and richer game stories")
             benefit("No account, no sign-up — it just starts")
 
+            // Guideline 3.1.2(c): the billed amount is the dominant pricing
+            // element; the trial reads as a subordinate detail beneath it.
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(price ?? "$5.99")/month")
+                    .font(.title2.bold())
+                    .foregroundStyle(OnboardingFlow.paper)
+                Text("First 7 days free. Auto-renews monthly until cancelled. No payment due today.")
+                    .font(.footnote)
+                    .foregroundStyle(OnboardingFlow.paper.opacity(0.7))
+            }
+            .padding(.top, 2)
+
             Button(action: onTrial) {
-                Text("Start my free trial")
+                Text("Start Pro Coach")
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
