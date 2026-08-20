@@ -23,6 +23,19 @@ impl Judgment {
     pub fn is_notable(&self) -> bool {
         matches!(self, Judgment::Inaccuracy | Judgment::Mistake | Judgment::Blunder)
     }
+
+    /// Lower-case wire/display name. Matches the strings the store round
+    /// trips, so a stored judgment and a live one always read the same.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Judgment::Best => "best",
+            Judgment::Excellent => "excellent",
+            Judgment::Good => "good",
+            Judgment::Inaccuracy => "inaccuracy",
+            Judgment::Mistake => "mistake",
+            Judgment::Blunder => "blunder",
+        }
+    }
 }
 
 /// Classify a move given the eval of the best line and the eval actually

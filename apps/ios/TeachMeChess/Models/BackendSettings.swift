@@ -47,7 +47,7 @@ enum CoachChattiness: String, CaseIterable, Identifiable {
         case .quiet:
             return "The coach only speaks up about inaccuracies, mistakes, and blunders."
         case .balanced:
-            return "Reactions to notable moves and milestones, periodic praise, and warnings on real threats."
+            return "The coach stays quiet until the game significantly shifts, then recaps the moves that led to the swing."
         case .chatty:
             return "A full reaction to every move, plus threat warnings, phase notes, and game summaries."
         }
@@ -63,12 +63,14 @@ enum CoachChattiness: String, CaseIterable, Identifiable {
 
     private static let key = "coach.commentaryStyle"
 
-    /// Default is Chatty — the product direction: an engaged, talkative
-    /// coach out of the box.
+    /// Default is Balanced: the coach holds its tongue until the game
+    /// significantly shifts, then recaps the stretch that led there.
+    /// Chatty proved overbearing as a default: commentary on every move
+    /// interrupts more than it teaches.
     static func load() -> CoachChattiness {
         guard let raw = UserDefaults.standard.string(forKey: key),
               let style = CoachChattiness(rawValue: raw)
-        else { return .chatty }
+        else { return .balanced }
         return style
     }
 

@@ -1,11 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// Main screen, docked layout: the board (plus a thin status strip) is
-/// pinned to the top and never scrolls; a compact moves pill sits between
-/// board and coach panel; the coach panel fills the remaining height with
-/// its own internal scroller and a chat field pinned at its bottom (above
-/// the keyboard). A summary sheet appears when the game ends.
+/// Main screen: the board (plus a thin status strip and a compact moves
+/// pill) is pinned to the top; the coach's feedback lives in a card dock
+/// pinned to the bottom. Each piece of feedback is one card: the newest
+/// shows collapsed, a tap expands it over the board, and swiping pages
+/// back through earlier cards. Talking to the coach happens in a chat
+/// sheet the dock's "Ask" button opens, so the conversation UI only
+/// appears when asked for. A summary sheet appears when the game ends.
 struct GameScreen: View {
     @State private var model = GameViewModel()
     @State private var showMoveList = false
@@ -13,125 +15,87 @@ struct GameScreen: View {
     @State private var showHistory = false
     @State private var showLexicon = false
     @State private var showNewGameDialog = false
-    /// User-chosen board/coach split, dragged via the panel's grab bar.
-    /// 0 = full-width board (minimum panel), 1 = max reading space (the
-    /// board collapses to the compact context strip). Persisted in
-    /// UserDefaults so the split survives relaunch; game state untouched.
-    @State private var panelFraction: CGFloat =
-        CGFloat(UserDefaults.standard.double(forKey: GameScreen.panelFractionKey))
-    /// Fraction captured when the current grab-bar drag began (nil = no
-    /// drag in flight) — the drag is applied as a delta on top of this.
-    @State private var dragBaseFraction: CGFloat?
-    @FocusState private var chatFocused: Bool
+    @State private var showReview = false
+    /// The chat sheet ("Ask the coach") is up.
+    @State private var showChat = false
+    /// Card currently expanded over the board, nil when all are collapsed.
+    @State private var expandedMessage: CoachMessage?
+    /// The App Store rating ask. Named apart from `model.requestReview()`,
+    /// which builds the game walkthrough and has nothing to do with this.
+    @Environment(\.requestReview) private var requestAppStoreReview
 
-    static let panelFractionKey = "coach.panelFraction"
-    /// Board edge (points) below which the shrinking board morphs into the
-    /// compact context strip instead of an unreadably tiny board.
-    static let compactBoardThreshold: CGFloat = 200
+    /// Vertical points reserved for everything that is not the board
+    /// (status strip, trays, moves pill, card dock, spacing): the board
+    /// shrinks below full width only when a screen is too short for it.
+    private static let reservedHeight: CGFloat = 330
 
-    /// Spring used for every layout-morph transition.
+    /// Spring used for the card expand/collapse morph.
     static let expandSpring = Animation.spring(response: 0.35, dampingFraction: 0.85)
 
     var body: some View {
         @Bindable var model = model
         NavigationStack {
-            // The board's height derives from the SCREEN WIDTH (which the
-            // keyboard never changes), so the docked board never shrinks
-            // when the keyboard appears — only the flexible coach panel
-            // absorbs the height change. A full-width board plus keyboard
-            // plus chrome physically exceeds an iPhone screen, so while the
-            // chat field is FOCUSED the secondary chrome (nav bar, status
-            // strip, moves pill, panel header) collapses; the board keeps
-            // its exact size and the chat input stays above the keyboard.
             GeometryReader { geo in
-                // The grab-bar drag scales the board edge between full
-                // width and zero; below the threshold the board morphs
-                // into the compact strip (the swap is animated so crossing
-                // mid-drag feels smooth, not jumpy).
                 let fullSide = geo.size.width - 20
-                let side = max(0, fullSide * (1 - panelFraction))
-                let compact = side < Self.compactBoardThreshold
-                VStack(spacing: 10) {
-                    if compact {
-                        // Max-read mode: compact context strip (mini board
-                        // + turn/last-move info). Drag the grab bar down
-                        // to bring the full board back.
-                        compactBoardStrip
-                    } else {
-                        VStack(spacing: 10) {
-                            if !chatFocused { statusStrip }
-                            // Captured-pieces trays hug the board: above it,
-                            // what the opponent (Black) has taken — white
-                            // glyphs; below it, the student's haul — black
-                            // glyphs. Each row collapses to nothing while
-                            // empty, and while typing they yield their
-                            // points to the keyboard like the other chrome
-                            // (the board itself never resizes). At a custom
-                            // split the trays track the shrunken, centered
-                            // board's width so they keep hugging its edges.
-                            VStack(spacing: 2) {
-                                if !chatFocused {
-                                    CapturedTrayRow(
-                                        letters: model.material.capturedByBlack,
-                                        advantage: model.material.blackAdvantage)
-                                        .frame(width: side, alignment: .leading)
-                                        .padding(.leading, 4)
-                                }
-                                BoardView(model: model)
-                                    .frame(width: side, height: side)
-                                if !chatFocused {
-                                    CapturedTrayRow(
-                                        letters: model.material.capturedByWhite,
-                                        advantage: model.material.whiteAdvantage)
-                                        .frame(width: side, alignment: .leading)
-                                        .padding(.leading, 4)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            if !chatFocused { movesPill }
+                let side = max(220, min(fullSide, geo.size.height - Self.reservedHeight))
+                ZStack(alignment: .bottom) {
+                    VStack(spacing: 10) {
+                        statusStrip
+                        // Captured-pieces trays hug the board: above it,
+                        // what the opponent (Black) has taken, in white
+                        // glyphs; below it, the student's haul, in black
+                        // glyphs. Each row collapses to nothing while
+                        // empty. They track the board's width so they keep
+                        // hugging its edges.
+                        VStack(spacing: 2) {
+                            CapturedTrayRow(
+                                letters: model.material.capturedByBlack,
+                                advantage: model.material.blackAdvantage)
+                                .frame(width: side, alignment: .leading)
+                                .padding(.leading, 4)
+                            BoardView(model: model)
+                                .frame(width: side, height: side)
+                            CapturedTrayRow(
+                                letters: model.material.capturedByWhite,
+                                advantage: model.material.whiteAdvantage)
+                                .frame(width: side, alignment: .leading)
+                                .padding(.leading, 4)
                         }
-                        // Tapping the board/strip/pill area dismisses the
-                        // keyboard. A SIMULTANEOUS gesture, so the squares'
-                        // own tap gestures still fire — no dead first tap.
-                        .simultaneousGesture(TapGesture().onEnded { Self.hideKeyboard() })
+                        .frame(maxWidth: .infinity)
+                        movesPill
+                        Spacer(minLength: 6)
+                        CoachCardDock(
+                            model: model,
+                            onExpand: { message in
+                                withAnimation(Self.expandSpring) {
+                                    expandedMessage = message
+                                }
+                            },
+                            onAsk: { showChat = true },
+                            onReview: { showReview = true })
                     }
-                    CoachPanel(
-                        model: model, chatFocused: $chatFocused,
-                        isCompact: compact,
-                        onDragChanged: { translationY in
-                            let base = dragBaseFraction ?? panelFraction
-                            dragBaseFraction = base
-                            // Dragging up (negative translation) grows the
-                            // panel; the board absorbs the difference.
-                            panelFraction = min(1, max(0, base - translationY / fullSide))
-                        },
-                        onDragEnded: {
-                            dragBaseFraction = nil
-                            // Settle near-extremes exactly: a drag that ends
-                            // within 5% of full board (or max read) snaps
-                            // there, so "back to full width" is reachable
-                            // without pixel-perfect dragging.
-                            if panelFraction < 0.05 {
-                                withAnimation(Self.expandSpring) { panelFraction = 0 }
-                            } else if panelFraction > 0.95 {
-                                withAnimation(Self.expandSpring) { panelFraction = 1 }
-                            }
-                            Self.persistFraction(panelFraction)
-                        },
-                        onSnapToggle: {
-                            // Double-tap on the grab bar snaps between the
-                            // two presets: full board and max read.
-                            withAnimation(Self.expandSpring) {
-                                panelFraction = panelFraction > 0.5 ? 0 : 1
-                            }
-                            Self.persistFraction(panelFraction)
-                        })
+                    .padding(.top, 4)
+
+                    // Expanded card: floats over the board, board still
+                    // visible above it so tapped chess mentions can light
+                    // up squares. Tap outside (or Close) to collapse.
+                    if let message = expandedMessage {
+                        Color.black.opacity(0.22)
+                            .ignoresSafeArea()
+                            .onTapGesture { collapseCard() }
+                            .transition(.opacity)
+                        ExpandedCoachCard(
+                            message: message,
+                            model: model,
+                            onClose: { collapseCard() })
+                            .frame(maxHeight: geo.size.height * 0.62)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 8)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
-                .padding(.top, 4)
-                .animation(.easeInOut(duration: 0.2), value: chatFocused)
-                .animation(Self.expandSpring, value: compact)
+                .animation(Self.expandSpring, value: expandedMessage?.id)
             }
-            .toolbar(chatFocused ? .hidden : .visible, for: .navigationBar)
             .navigationTitle("Sealed Move")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -195,6 +159,14 @@ struct GameScreen: View {
                 LexiconSheet(entry: entry)
                     .presentationDetents([.large, .medium])
             }
+            // The conversation UI only exists once asked for: a medium
+            // detent leaves the board visible, so mention links in the
+            // coach's answers can still spotlight squares behind it.
+            .sheet(isPresented: $showChat) {
+                CoachChatSheet(model: model)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+            }
             // The trial lapsed (launch check or a proxy rejection) —
             // convert to the subscription or switch to the free coach.
             .sheet(isPresented: $model.showTrialExpiry) {
@@ -207,16 +179,47 @@ struct GameScreen: View {
                 ProCoachConsentSheet(model: model)
                     .presentationDetents([.medium, .large])
             }
-            .sheet(item: $model.gameSummary) { summary in
-                GameSummarySheet(summary: summary) {
-                    model.gameSummary = nil
-                    model.newGame()
-                }
-                .presentationDetents([.medium])
+            .sheet(item: $model.gameSummary, onDismiss: {
+                // Not while the walkthrough is opening (it asks on its own
+                // way out), and not straight after a loss.
+                if !showReview && !model.lastGameWasLoss { askForRating() }
+            }) { summary in
+                GameSummarySheet(
+                    summary: summary,
+                    onNewGame: {
+                        model.gameSummary = nil
+                        model.newGame()
+                    },
+                    onReview: {
+                        model.gameSummary = nil
+                        showReview = true
+                    })
+                    .presentationDetents([.medium])
+            }
+            // The post-game walkthrough. Reachable from the summary sheet
+            // and from the coach toolbar, so a student who only wants the
+            // follow-up never has to sit through live commentary to get it.
+            .sheet(isPresented: $showReview, onDismiss: { askForRating() }) {
+                GameReviewSheet(model: model)
             }
             // Once per lapsed trial: offer convert-or-downgrade without
             // waiting for the student to bump into a rejected request.
             .task { await model.checkTrialExpiry() }
+        }
+    }
+
+    private func collapseCard() {
+        withAnimation(Self.expandSpring) { expandedMessage = nil }
+    }
+
+    /// Ask for an App Store rating if this is a good moment and we have
+    /// not already asked this release. The delay lets the sheet finish
+    /// dismissing: an ask that races the teardown is silently dropped.
+    private func askForRating() {
+        guard RatingPrompt.isEligible else { return }
+        RatingPrompt.markAsked()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            requestAppStoreReview()
         }
     }
 
@@ -225,82 +228,6 @@ struct GameScreen: View {
     static func hideKeyboard() {
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-
-    /// Persist the user's split so it survives relaunch.
-    static func persistFraction(_ fraction: CGFloat) {
-        UserDefaults.standard.set(Double(fraction), forKey: panelFractionKey)
-    }
-
-    // MARK: Compact board strip (shown in max-read mode)
-
-    /// Mini board thumbnail beside whose-turn + last-move info, shown once
-    /// the dragged board drops below the readability threshold. The
-    /// thumbnail is non-interactive (no square taps while reading); drag
-    /// the grab bar down to restore the full board. Updates live if an
-    /// opponent move lands while reading.
-    private var compactBoardStrip: some View {
-        HStack(spacing: 12) {
-            BoardView(model: model, showsThinkingOverlay: false)
-                .frame(width: 132, height: 132)
-                .allowsHitTesting(false)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(compactStatusText)
-                    .font(.subheadline.bold())
-                    .lineLimit(2)
-                Text(latestPairText)
-                    .font(.system(.footnote, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                // Space is tight in reading mode: no full trays, just a
-                // "+N" material badge (with the biggest captured piece as
-                // a tiny leading glyph) when material is uneven.
-                if model.material.materialDiff != 0 {
-                    HStack(spacing: 3) {
-                        if let letter = compactBadgeLetter {
-                            CapturedPieceGlyph(letter: letter, size: 12)
-                        }
-                        Text("+\(abs(Int(model.material.materialDiff)))")
-                            .font(.caption2.bold().monospacedDigit())
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                if model.isBotThinking {
-                    HStack(spacing: 5) {
-                        ProgressView().controlSize(.mini)
-                        Text("Opponent is thinking…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Spacer()
-        }
-        .padding(10)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 10)
-        .contentShape(Rectangle())
-        // Keyboard rule: tapping the strip only ever dismisses the
-        // keyboard — resizing is the grab bar's job.
-        .onTapGesture { Self.hideKeyboard() }
-        .accessibilityLabel("Board summary. Drag the coach panel's grab bar down to show the full board.")
-    }
-
-    /// Most valuable piece the leading side has captured — the compact
-    /// badge's tiny glyph. Nil in the promotion edge case where a side
-    /// leads on material without a capture to show for it.
-    private var compactBadgeLetter: String? {
-        let m = model.material
-        return m.materialDiff > 0 ? m.capturedByWhite.first : m.capturedByBlack.first
-    }
-
-    private var compactStatusText: String {
-        if let ply = model.reviewPly {
-            return "Reviewing \(model.plyLabel(ply))"
-        }
-        if let outcome = model.outcomeText {
-            return outcome
-        }
-        return model.whiteToMove ? "White to move" : "Black to move"
     }
 
     // MARK: Status strip (turn banner / review banner)
@@ -335,6 +262,24 @@ struct GameScreen: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
                 .background(Color.yellow.opacity(0.3), in: Capsule())
+        } else if let opening = model.currentOpening {
+            // The opening was already identified algorithmically for the
+            // coach's benefit; naming it above the board tells the student
+            // what they are playing while they play it.
+            HStack(spacing: 5) {
+                Text(opening.shortName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(model.whiteToMove ? "White to move" : "Black to move")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .layoutPriority(1)
+            }
+            .accessibilityElement(children: .combine)
         } else {
             Text(model.whiteToMove ? "White to move" : "Black to move")
                 .font(.subheadline)
@@ -382,18 +327,335 @@ struct GameScreen: View {
     }
 }
 
+// MARK: - Card styling shared by dock, expansion, and chat rows
+
+private extension CoachMessage {
+    /// Icon + tint that identify the message's role wherever it renders.
+    var symbolName: String {
+        switch role {
+        case .coach: return "graduationcap"
+        case .note: return "eye"
+        case .system: return "info.circle"
+        case .student: return "person"
+        }
+    }
+
+    var symbolTint: Color {
+        switch role {
+        case .note: return Brand.tournamentGreen
+        default: return .secondary
+        }
+    }
+
+    /// Card surface color: notes keep their "watch out" green wash.
+    var cardBackground: Color {
+        role == .note
+            ? Brand.tournamentGreen.opacity(0.10)
+            : Color(.secondarySystemBackground)
+    }
+}
+
+/// Small "review" tag for messages produced while rewinding.
+private struct ReviewTag: View {
+    var body: some View {
+        Text("review")
+            .font(.caption2.bold())
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Brand.annotation.opacity(0.14), in: Capsule())
+            .foregroundStyle(Brand.annotation)
+    }
+}
+
+// MARK: - Coach card dock
+
+/// Bottom-docked stack of feedback cards. The newest card shows collapsed;
+/// swiping pages back through earlier ones; a tap hands the card to the
+/// expansion overlay. Below the cards sit the coach controls (ask / pause /
+/// review); the chat UI itself lives in a sheet.
+private struct CoachCardDock: View {
+    @Bindable var model: GameViewModel
+    var onExpand: (CoachMessage) -> Void
+    var onAsk: () -> Void
+    var onReview: () -> Void
+
+    /// Which card the pager shows (message id).
+    @State private var selection: UUID?
+
+    /// How many recent cards stay swipeable. Older feedback is still in
+    /// the chat sheet's transcript.
+    private static let dockLimit = 50
+    private static let cardHeight: CGFloat = 96
+
+    /// Feedback cards: everything the coach volunteered. What the student
+    /// typed belongs to the chat sheet, not the feedback stack.
+    private var cards: [CoachMessage] {
+        Array(model.coachFeed.filter { $0.role != .student }.suffix(Self.dockLimit))
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            if cards.isEmpty {
+                emptyCard
+            } else {
+                TabView(selection: $selection) {
+                    ForEach(cards) { message in
+                        CollapsedCoachCard(message: message)
+                            .padding(.horizontal, 2)
+                            .onTapGesture { onExpand(message) }
+                            .tag(Optional(message.id))
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(height: Self.cardHeight)
+            }
+
+            HStack(spacing: 8) {
+                if model.isCoachThinking {
+                    ProgressView().controlSize(.mini)
+                    Text("Coach is thinking…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else if let index = currentIndex, cards.count > 1 {
+                    Text("\(index + 1) of \(cards.count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    if index < cards.count - 1 {
+                        Button("Latest") { snapToNewest() }
+                            .font(.caption2.bold())
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Brand.tournamentGreen)
+                    }
+                }
+                Spacer()
+                if model.isCoachPaused {
+                    Text("paused")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.18), in: Capsule())
+                        .foregroundStyle(.orange)
+                }
+            }
+            .frame(minHeight: 14)
+
+            toolbar
+        }
+        .padding(10)
+        .background(Color(.tertiarySystemFill).opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+        .onAppear { selection = cards.last?.id }
+        .onChange(of: model.coachFeed) {
+            // A new card always fronts the stack; earlier ones stay a
+            // swipe away.
+            snapToNewest()
+        }
+    }
+
+    private var currentIndex: Int? {
+        cards.firstIndex(where: { $0.id == selection })
+    }
+
+    private func snapToNewest() {
+        withAnimation { selection = cards.last?.id }
+    }
+
+    private var emptyCard: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "graduationcap")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("The coach's feedback stacks up here. Swipe back through it any time.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.cardHeight)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 2)
+    }
+
+    // MARK: Controls row
+
+    private var toolbar: some View {
+        HStack(spacing: 8) {
+            Button(action: onAsk) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bubble.left.and.text.bubble.right")
+                    Text(model.isReviewing ? "Ask about this position" : "Ask the coach")
+                        .lineLimit(1)
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.tertiarySystemBackground), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.sessionReady)
+            .accessibilityLabel("Ask the coach a question")
+
+            toolbarButton(
+                systemImage: model.isCoachPaused ? "play.fill" : "pause.fill",
+                tint: model.isCoachPaused ? Brand.tournamentGreen : .secondary,
+                label: model.isCoachPaused ? "Resume the coach" : "Pause the coach",
+                hint: model.isCoachPaused
+                    ? "The coach comments again, starting with a catch-up on what it missed."
+                    : "The coach stops commenting. It keeps checking your moves with the engine."
+            ) {
+                model.togglePause()
+            }
+            .disabled(!model.sessionReady || model.isRecapping)
+
+            toolbarButton(
+                systemImage: "chart.line.uptrend.xyaxis",
+                tint: .secondary,
+                label: "Review this game",
+                hint: "Analyzes the whole game and walks you through the moments that decided it."
+            ) {
+                onReview()
+            }
+            .disabled(!model.sessionReady || model.moves.isEmpty || model.isBuildingReview)
+        }
+    }
+
+    @ViewBuilder
+    private func toolbarButton(
+        systemImage: String, tint: Color, label: String, hint: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline)
+                .frame(width: 34, height: 34)
+                .background(Color(.tertiarySystemBackground), in: Circle())
+                .foregroundStyle(tint)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
+    }
+}
+
+/// One collapsed card: role icon, a few lines of the message, and the
+/// expand affordance. Markdown renders inline but links stay inert here:
+/// the whole card is one tap target for expansion.
+private struct CollapsedCoachCard: View {
+    let message: CoachMessage
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: message.symbolName)
+                .font(.caption)
+                .foregroundStyle(message.symbolTint)
+                .padding(.top, 3)
+            VStack(alignment: .leading, spacing: 3) {
+                if message.isReview {
+                    ReviewTag()
+                }
+                Text(MarkdownParser.inline(message.text))
+                    .font(message.role == .system ? .footnote : .callout)
+                    .fontDesign(message.role == .system ? .default : .serif)
+                    .foregroundStyle(message.role == .system ? .secondary : .primary)
+                    .lineLimit(message.isReview ? 2 : 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 3)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(message.cardBackground, in: RoundedRectangle(cornerRadius: 12))
+        .contentShape(Rectangle())
+        .accessibilityHint("Tap to read the whole message.")
+    }
+}
+
+/// The expanded card: full message, scrollable, with live chess-mention
+/// links; the board stays visible above so a tapped mention can light up
+/// its squares.
+private struct ExpandedCoachCard: View {
+    let message: CoachMessage
+    let model: GameViewModel
+    var onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: message.symbolName)
+                    .font(.caption)
+                    .foregroundStyle(message.symbolTint)
+                Text(headerTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if message.isReview {
+                    ReviewTag()
+                }
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Close the expanded card")
+            }
+            // A short message hugs its content; a long one caps at the
+            // card's max height and scrolls inside.
+            ViewThatFits(in: .vertical) {
+                messageBody
+                ScrollView { messageBody }
+                    .frame(maxWidth: .infinity)
+            }
+            Text("Tap a highlighted move or square to see it on the board.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+    }
+
+    private var messageBody: some View {
+        MarkdownText(text: message.text, chessLinks: message.role != .system)
+            .font(.body)
+            .fontDesign(message.role == .system ? .default : .serif)
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .environment(\.openURL, coachLinkAction)
+    }
+
+    private var headerTitle: String {
+        switch message.role {
+        case .note: return "Watch out"
+        case .system: return "Session"
+        default: return "Coach"
+        }
+    }
+
+    /// Intercepts `coachref://` mention links (board spotlight / lexicon);
+    /// any real web link the model wrote still opens normally.
+    private var coachLinkAction: OpenURLAction {
+        OpenURLAction { url in
+            guard url.scheme == ChessMention.urlScheme else { return .systemAction }
+            model.handleCoachLink(url, in: message)
+            return .handled
+        }
+    }
+}
+
 // MARK: - Feed scroll anchor
 
 private extension View {
-    /// Bottom-anchor the coach feed like a chat log. On iOS 18+ the anchor
-    /// is limited to the initial offset + alignment roles — deliberately
-    /// NOT `.sizeChanges`: with the drag-resizable panel the scroller's
-    /// height changes constantly, and the full anchor's re-pin-on-resize
-    /// feeds back into safe-area/layout updates until the main thread
-    /// livelocks (100% CPU freeze, reproduced on the iOS 26.2 simulator
-    /// when focusing the chat field at a custom split). Explicit
-    /// `scrollTo` calls already keep the newest message in view on feed
-    /// changes, so the size-change role is redundant anyway.
+    /// Bottom-anchor the chat transcript like a chat log. On iOS 18+ the
+    /// anchor is limited to the initial offset + alignment roles: explicit
+    /// `scrollTo` calls keep the newest message in view on feed changes,
+    /// so the size-change role is redundant (and historically it fed back
+    /// into keyboard/layout updates until the main thread livelocked).
     @ViewBuilder
     func feedBottomAnchor() -> some View {
         if #available(iOS 18.0, *) {
@@ -406,62 +668,25 @@ private extension View {
     }
 }
 
-// MARK: - Coach panel
+// MARK: - Chat sheet
 
-/// Chronological coach feed in its own scroller (auto-scrolls to the
-/// newest message) with the chat input pinned at the bottom. A grab bar
-/// spans the panel's top: dragging it (or anywhere on the slim header row)
-/// resizes the board/panel split, double-tapping snaps between full-board
-/// and max-read presets.
-private struct CoachPanel: View {
+/// The conversation with the coach, summoned by the dock's Ask button. The
+/// full transcript (feedback cards included) reads like a chat log here,
+/// with the input field pinned at the bottom. At the medium detent the
+/// board stays visible behind, so mention links in answers still spotlight
+/// squares.
+struct CoachChatSheet: View {
     @Bindable var model: GameViewModel
-    var chatFocused: FocusState<Bool>.Binding
-    /// The board is currently the compact context strip (max-read side of
-    /// the threshold) — only used to re-anchor the feed after the morph.
-    var isCompact: Bool
-    /// Grab-bar drag callbacks (translation in points; positive = down).
-    var onDragChanged: (CGFloat) -> Void
-    var onDragEnded: () -> Void
-    var onSnapToggle: () -> Void
-
-    private var isFocused: Bool { chatFocused.wrappedValue }
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var chatFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Grab zone: drag-handle pill + slim header row, one full-width
-            // drag target (~44pt). Collapses while typing — every point
-            // goes to the feed + input, and the split is suspended until
-            // the keyboard dismisses (see GameScreen's layout comment).
-            if !isFocused {
-                VStack(spacing: 3) {
-                    Capsule()
-                        .fill(Color(.tertiaryLabel))
-                        .frame(width: 36, height: 5)
-                    HStack {
-                        Label("Coach", systemImage: "graduationcap.fill")
-                            .font(.subheadline.bold())
-                        Spacer()
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .top)
-                .contentShape(Rectangle())
-                // The resize drag lives on this zone ONLY — never on the
-                // feed, so it can't fight the feed's scroller.
-                .gesture(
-                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                        .onChanged { onDragChanged($0.translation.height) }
-                        .onEnded { _ in onDragEnded() }
-                )
-                .onTapGesture(count: 2) { onSnapToggle() }
-                .accessibilityLabel("Coach panel grab bar")
-                .accessibilityHint("Drag up or down to resize the coach panel. Double tap to switch between full board and reading mode.")
-            }
-
+        NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(model.coachFeed) { message in
-                            messageRow(message)
+                            CoachMessageRow(message: message, model: model)
                                 .id(message.id)
                         }
                         if model.isCoachThinking {
@@ -474,13 +699,11 @@ private struct CoachPanel: View {
                             .id("thinking")
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                // Tapping the feed background dismisses the keyboard
-                // (simultaneous, so scrolling/taps inside still work).
-                .simultaneousGesture(TapGesture().onEnded { GameScreen.hideKeyboard() })
                 .feedBottomAnchor()
                 .onChange(of: model.coachFeed) {
                     withAnimation {
@@ -498,57 +721,53 @@ private struct CoachPanel: View {
                         }
                     }
                 }
-                .onChange(of: isFocused) {
-                    // Keep the newest message in view while the keyboard
-                    // animates in and the panel shrinks.
-                    guard isFocused, let last = model.coachFeed.last else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
-                }
-                .onChange(of: isCompact) {
-                    // Re-anchor to the newest message once the board/strip
-                    // morph spring has settled (scrolling mid-resize gets
-                    // clobbered by the animation).
-                    guard let last = model.coachFeed.last else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
-                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            HStack(spacing: 8) {
-                TextField(model.isReviewing ? "Ask about this position…" : "Ask the coach…",
-                          text: $model.chatDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .focused(chatFocused)
-                    .submitLabel(.send)
-                    .onSubmit {
-                        model.sendChat()
-                        chatFocused.wrappedValue = false
-                    }
-                Button {
-                    model.sendChat()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+            .safeAreaInset(edge: .bottom) { chatField }
+            .navigationTitle(model.isReviewing ? "About this position" : "Ask the coach")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
                 }
-                .disabled(!model.sessionReady || model.isCoachThinking
-                          || model.chatDraft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding([.horizontal, .bottom], isFocused ? 8 : 16)
-        // The grab bar hugs the panel's top edge — slim top inset.
-        .padding(.top, isFocused ? 8 : 6)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 10)
-        .padding(.bottom, isFocused ? 2 : 6)
-        .frame(maxHeight: .infinity)
+        .onAppear {
+            // The sheet exists to type into, so hand focus over right away.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                chatFocused = true
+            }
+        }
     }
 
-    @ViewBuilder
-    private func messageRow(_ message: CoachMessage) -> some View {
+    private var chatField: some View {
+        HStack(spacing: 8) {
+            TextField(model.isReviewing ? "Ask about this position…" : "Ask the coach…",
+                      text: $model.chatDraft)
+                .textFieldStyle(.roundedBorder)
+                .focused($chatFocused)
+                .submitLabel(.send)
+                .onSubmit { model.sendChat() }
+            Button {
+                model.sendChat()
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.title2)
+            }
+            .disabled(!model.sessionReady || model.isCoachThinking
+                      || model.chatDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(10)
+        .background(.bar)
+    }
+}
+
+/// One transcript row in the chat sheet: the same role styling the cards
+/// use, in chat-log form.
+private struct CoachMessageRow: View {
+    let message: CoachMessage
+    let model: GameViewModel
+
+    var body: some View {
         if message.role == .system {
             // Subtle centered system line ("Resumed game in progress…").
             MarkdownText(text: message.text)
@@ -573,7 +792,7 @@ private struct CoachPanel: View {
             }
             .padding(8)
             .background(Brand.tournamentGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-            .environment(\.openURL, coachLinkAction(for: message))
+            .environment(\.openURL, coachLinkAction)
         } else {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: message.role == .coach ? "graduationcap" : "person")
@@ -582,12 +801,7 @@ private struct CoachPanel: View {
                     .padding(.top, 3)
                 VStack(alignment: .leading, spacing: 2) {
                     if message.isReview {
-                        Text("review")
-                            .font(.caption2.bold())
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(Brand.annotation.opacity(0.14), in: Capsule())
-                            .foregroundStyle(Brand.annotation)
+                        ReviewTag()
                     }
                     // Coach messages render light markdown (with tappable
                     // chess mentions); what the student typed stays
@@ -600,7 +814,7 @@ private struct CoachPanel: View {
                             .font(.body)
                             .fontDesign(.serif)
                             .foregroundStyle(.primary)
-                            .environment(\.openURL, coachLinkAction(for: message))
+                            .environment(\.openURL, coachLinkAction)
                     } else {
                         Text(message.text)
                             .font(.callout)
@@ -614,7 +828,7 @@ private struct CoachPanel: View {
 
     /// Intercepts `coachref://` mention links (board spotlight / lexicon);
     /// any real web link the model wrote still opens normally.
-    private func coachLinkAction(for message: CoachMessage) -> OpenURLAction {
+    private var coachLinkAction: OpenURLAction {
         OpenURLAction { url in
             guard url.scheme == ChessMention.urlScheme else { return .systemAction }
             model.handleCoachLink(url, in: message)
@@ -701,6 +915,7 @@ private struct MoveListSheet: View {
 struct GameSummarySheet: View {
     let summary: GameSummaryInfo
     let onNewGame: () -> Void
+    let onReview: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -739,6 +954,19 @@ struct GameSummarySheet: View {
             }
             .padding(.horizontal)
 
+            // The walkthrough leads: it is the part of the game that
+            // teaches, and starting a new game discards the chance to see
+            // it fresh.
+            Button {
+                dismiss()
+                onReview()
+            } label: {
+                Label("Review this game", systemImage: "chart.line.uptrend.xyaxis")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal, 24)
+
             Button {
                 dismiss()
                 onNewGame()
@@ -746,7 +974,7 @@ struct GameSummarySheet: View {
                 Text("New game")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .padding(.horizontal, 24)
 
             Button("Keep looking at the board") { dismiss() }

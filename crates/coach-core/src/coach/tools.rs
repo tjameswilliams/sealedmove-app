@@ -77,10 +77,15 @@ fn lookup_opening() -> ToolDef {
 fn detect_motifs() -> ToolDef {
     ToolDef {
         name: "detect_motifs".into(),
-        description: "Scan the current position for tactical motifs (hanging pieces, forks, \
-                      pins, skewers, back-rank weaknesses, available discovered attacks). \
-                      Each result names the squares involved. Call this before pointing out \
-                      any tactic — never claim a tactic exists from your own reading."
+        description: "Scan the current position for motifs, most urgent first: tactics \
+                      (double check, hanging pieces, forks, pins, skewers, trapped pieces, \
+                      overloaded and removable defenders, back-rank and smothered-mate \
+                      shapes, discovered attacks, batteries) and, once those run out, \
+                      positional facts (passed pawns, outposts, the bishop pair, isolated, \
+                      doubled and backward pawns, the opposition, Lucena and Philidor rook \
+                      endings). Each result names the squares involved. Call this before \
+                      pointing out any tactic — never claim a tactic exists from your own \
+                      reading."
             .into(),
         parameters: json!({ "type": "object", "properties": {}, "required": [] }),
     }

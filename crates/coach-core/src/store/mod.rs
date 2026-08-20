@@ -51,14 +51,7 @@ fn result_str(r: GameResult) -> &'static str {
 
 /// `Judgment` → its serde name, the form stored in `moves.judgment`.
 fn judgment_str(j: Judgment) -> &'static str {
-    match j {
-        Judgment::Best => "best",
-        Judgment::Excellent => "excellent",
-        Judgment::Good => "good",
-        Judgment::Inaccuracy => "inaccuracy",
-        Judgment::Mistake => "mistake",
-        Judgment::Blunder => "blunder",
-    }
+    j.label()
 }
 
 /// Parse a stored judgment string back into a [`Judgment`].
@@ -415,7 +408,10 @@ impl GameStore {
         }))
     }
 
-    fn moves_for(&self, game_id: i64) -> Result<Vec<StoredMove>, StoreError> {
+    /// Every recorded move of one game, ply order. Public because the live
+    /// session reads its own in-progress rows back (the pause recap needs
+    /// the judgments it stayed quiet about).
+    pub fn moves_for(&self, game_id: i64) -> Result<Vec<StoredMove>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT ply, san, uci, by_student, judgment, cp_loss,
                     allows_mate_in, missed_mate_in, created_at

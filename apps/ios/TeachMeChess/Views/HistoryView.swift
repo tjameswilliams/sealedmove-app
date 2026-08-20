@@ -238,6 +238,7 @@ struct GameDetailScreen: View {
     @State private var question = ""
     @State private var askFeed: [CoachMessage] = []
     @State private var isAsking = false
+    @State private var showReview = false
     @FocusState private var askFocused: Bool
 
     var body: some View {
@@ -253,6 +254,30 @@ struct GameDetailScreen: View {
         .navigationTitle(detail.map { $0.game.opening ?? "Game" } ?? "Game")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: load)
+        // The same walkthrough the live game gets. The session analyzes
+        // this game's move list on a scratch board, so it is safe to run
+        // even with a game in progress.
+        .sheet(isPresented: $showReview) {
+            if let detail {
+                GameReviewSheet(
+                    model: model,
+                    subject: .storedGame(gameId),
+                    request: { model in
+                        model.requestReview(
+                            storedGame: gameId,
+                            moves: replayableMoves(detail).map(\.san),
+                            startingFen: detail.game.startingFen,
+                            studentIsWhite: Self.studentIsWhite(detail))
+                    })
+            }
+        }
+    }
+
+    /// Which colour the student had, from the first move the store marked
+    /// as theirs (move plies are 0-based, so an even ply is White).
+    static func studentIsWhite(_ detail: GameDetailInfo) -> Bool {
+        detail.moves.first(where: { $0.byStudent })
+            .map { $0.ply.isMultiple(of: 2) } ?? true
     }
 
     @ViewBuilder
@@ -314,6 +339,18 @@ struct GameDetailScreen: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                showReview = true
+            } label: {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.subheadline)
+                    .frame(width: 34, height: 34)
+                    .background(Color(.secondarySystemBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(fens.count < 2 || model.isBuildingReview)
+            .accessibilityLabel("Review this game")
+            .accessibilityHint("Analyzes the whole game and walks you through the moments that decided it.")
         }
     }
 

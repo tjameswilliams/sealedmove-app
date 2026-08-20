@@ -448,7 +448,8 @@ async fn play(
         //    canned lines, so this one call covers both modes.
         //    react_to_student_move records its own chat row in the store.
         match session.react_to_student_move().await {
-            Ok(text) => println!("  [coach] {text}"),
+            Ok(Some(text)) => println!("  [coach] {text}"),
+            Ok(None) => {} // policy stayed silent (Balanced, steady game)
             Err(e) => {
                 let brief = session.brief_reaction();
                 println!("  [coach unavailable: {e}] {brief}");

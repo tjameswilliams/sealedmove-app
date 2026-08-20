@@ -27,3 +27,8 @@ pub mod game;
 pub mod llm;
 pub mod store;
 pub mod student;
+
+/// Which side a player has. Re-exported because it appears in this crate's
+/// public API (the whole-game review takes the student's color), so callers
+/// need not depend on shakmaty to name it.
+pub use shakmaty::Color;

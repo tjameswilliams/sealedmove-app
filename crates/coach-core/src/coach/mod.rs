@@ -2,6 +2,7 @@
 
 pub mod commentary;
 pub mod prompt;
+pub mod review;
 pub mod tools;
 
 pub use commentary::{
@@ -148,6 +149,13 @@ pub struct CoachSession {
     /// Which color the student plays — learned from whose turn it is when
     /// `judge_student_move` runs. Defaults to White before the first move.
     student_color: shakmaty::Color,
+    /// FEN the current game started from, or `None` for the standard start.
+    /// The whole-game review replays the move list from here, so a game set
+    /// up from a custom position reviews correctly.
+    game_start_fen: Option<String>,
+    /// Whether the attached model can actually narrate a supplied set of
+    /// facts. See [`Self::set_narration`].
+    narration_enabled: bool,
 }
 
 /// What `resume_from_store` restored — everything the UI needs to redraw the
@@ -188,6 +196,13 @@ pub struct CoachReply {
 const MAX_TOOL_ITERATIONS: usize = 8;
 /// How many student-move evals the session keeps for the trend line.
 const EVAL_HISTORY_CAP: usize = 6;
+/// Longest stretch (half-moves) a Balanced shift recap looks back over:
+/// after a long steady run the shift is a recent story, not a retelling.
+const SHIFT_WINDOW_MAX_PLIES: usize = 10;
+/// How many motifs the `detect_motifs` tool hands back. The detectors are
+/// priority-ordered, so this keeps the tactics and drops the long tail of
+/// structural observations.
+const MAX_REPORTED_MOTIFS: usize = 8;
 
 impl CoachSession {
     pub fn new(
@@ -218,7 +233,30 @@ impl CoachSession {
             last_opponent_ctx: None,
             cached_analysis: None,
             student_color: shakmaty::Color::White,
+            game_start_fen: None,
+            narration_enabled: true,
         }
+    }
+
+    /// Declare whether the attached model can narrate: take a block of
+    /// deterministic facts and write prose about *those facts*.
+    ///
+    /// Every other model path degrades gracefully on its own, because a
+    /// model that answers off-topic still produces a plausible coaching
+    /// line. The catch-up recap and the game review do not: their whole
+    /// value is being specific about this game, so a stub backend that
+    /// replies with generic advice is strictly worse than the engine's own
+    /// wording. Capabilities cannot tell a stub from a small real model, so
+    /// the app, which knows which backend it installed, says so here.
+    ///
+    /// Default: enabled.
+    pub fn set_narration(&mut self, enabled: bool) {
+        self.narration_enabled = enabled;
+    }
+
+    /// Whether composed prose should be requested from the model.
+    pub(crate) fn narration_enabled(&self) -> bool {
+        self.narration_enabled
     }
 
     /// Set how much the coach talks (see [`CommentaryStyle`]). Takes effect
@@ -650,6 +688,7 @@ impl CoachSession {
             Some(f) => GameState::from_fen(f)?,
             None => GameState::new(),
         };
+        self.game_start_fen = fen.map(str::to_string);
         self.transcript.clear();
         self.last_verdict = None;
         self.accuracy = GameAccuracy::new();
@@ -709,34 +748,41 @@ impl CoachSession {
     /// React to the student's most recent judged move, at the cadence the
     /// commentary policy dictates:
     ///
+    /// - `Silent` → `None`: the policy decided this move deserves no
+    ///   interruption (Balanced, while the game holds steady).
     /// - `Brief` → a deterministic canned line from the expanded pool
     ///   ([`commentary::brief_line`], rotated by move number).
     /// - `Full(focuses)` → the LLM, fed the situation report plus explicit
     ///   focus instructions. With a `NullBackend` (engine-only play) this
     ///   degrades to the same canned line — the policy still runs, nothing
     ///   crashes.
+    /// - `ShiftRecap` → the LLM narrates the stretch of moves that led to a
+    ///   significant eval shift (Balanced's one way of speaking up).
     ///
-    /// Records what it said to the store's chat feed either way.
-    pub async fn react_to_student_move(&mut self) -> Result<String, CoachError> {
+    /// Records what it said to the store's chat feed whenever it speaks.
+    pub async fn react_to_student_move(&mut self) -> Result<Option<String>, CoachError> {
         let Some(verdict) = self.last_verdict.clone() else {
             let text = self.brief_reaction();
             let ply = self.game.history_san().len() as u32;
             self.store_try(|s, id| s.record_chat(id, ply, "coach", false, &text));
-            return Ok(text);
+            return Ok(Some(text));
         };
-        let move_number = (self.game.history_san().len() as u32 + 1) / 2;
+        let ply_now = self.game.history_san().len();
+        let move_number = (ply_now as u32 + 1) / 2;
         let phase = commentary::detect_phase(self.game.position());
         let opening = openings::lookup(self.game.history_san());
         let decision = self.policy.on_student_move(
             &verdict,
             &self.last_milestones.clone(),
             move_number,
+            ply_now,
             phase,
             opening.is_some(),
         );
 
         let text = match decision {
-            Decision::Silent | Decision::Brief => commentary::brief_line(&verdict, move_number),
+            Decision::Silent => return Ok(None),
+            Decision::Brief => commentary::brief_line(&verdict, move_number),
             Decision::Full(focuses) => {
                 let report = self.build_situation_report(phase, opening.as_ref());
                 let mut msg = format!(
@@ -754,9 +800,67 @@ impl CoachSession {
                 self.store_save_transcript();
                 text
             }
+            Decision::ShiftRecap { from_ply } => {
+                let trigger = format!(
+                    "the student's move {} (judged {}) moved the evaluation to {:+.2}",
+                    verdict.played_san,
+                    verdict.judgment.label(),
+                    verdict.eval_after_cp as f64 / 100.0
+                );
+                self.shift_recap(from_ply, &trigger, Some(verdict.eval_after_cp))
+                    .await?
+            }
         };
         let ply = self.game.history_san().len() as u32;
         self.store_try(|s, id| s.record_chat(id, ply, "coach", false, &text));
+        Ok(Some(text))
+    }
+
+    /// One Balanced shift-recap message: the moves since the coach last
+    /// spoke (capped at [`SHIFT_WINDOW_MAX_PLIES`]), the engine's verdicts
+    /// on them, and where the game stands now, narrated by the LLM (or the
+    /// deterministic [`commentary::shift_fallback`] line without one).
+    async fn shift_recap(
+        &mut self,
+        from_ply: usize,
+        trigger: &str,
+        eval_now: Option<i32>,
+    ) -> Result<String, CoachError> {
+        let history: Vec<String> = self.game.history_san().to_vec();
+        // Cap the window: after a long steady stretch the shift is a recent
+        // story, not a whole-game retelling.
+        let from = from_ply
+            .max(history.len().saturating_sub(SHIFT_WINDOW_MAX_PLIES))
+            .min(history.len().saturating_sub(1));
+
+        let judged = self.judged_moves_since(from);
+        // Eval before the window vs now, student's perspective.
+        let eval_span = if self.eval_history.len() >= 2 {
+            let start = self.eval_history.len().saturating_sub(judged.len() + 1);
+            let now = eval_now.or_else(|| self.eval_history.last().copied());
+            now.map(|n| (self.eval_history[start], n))
+        } else {
+            None
+        };
+
+        let phase = commentary::detect_phase(self.game.position());
+        let opening = openings::lookup(&history);
+        let situation = self.build_situation_report(phase, opening.as_ref());
+        let fallback = commentary::shift_fallback(&history, from, &judged, eval_span, phase);
+        if !self.narration_enabled {
+            return Ok(fallback);
+        }
+        let facts = commentary::shift_report(&history, from, &judged, eval_span, &situation);
+
+        self.transcript.push(Message::user(format!(
+            "The game has just shifted significantly: {trigger}. In ONE short message, \
+             walk the student through the recent stretch that led to this swing: what \
+             caused it and where things stand now. Lead with the move that mattered most; \
+             do not narrate every move. Here are the deterministic facts (engine + board; \
+             you may cite them directly):\n{facts}"
+        )));
+        let text = self.run_tool_loop(Some(fallback)).await?;
+        self.store_save_transcript();
         Ok(text)
     }
 
@@ -788,6 +892,17 @@ impl CoachSession {
         let text = match self.policy.on_opponent_move(&ctx) {
             Decision::Silent => return Ok(None),
             Decision::Brief => fallback(&[Focus::ThreatWarning]),
+            Decision::ShiftRecap { from_ply } => {
+                let trigger = format!(
+                    "the opponent's move {} swung the evaluation{}",
+                    ctx.opponent_san,
+                    ctx.eval_for_student_cp
+                        .map(|e| format!(" to {:+.2} for the student", e as f64 / 100.0))
+                        .unwrap_or_default()
+                );
+                self.shift_recap(from_ply, &trigger, ctx.eval_for_student_cp)
+                    .await?
+            }
             Decision::Full(focuses) => {
                 let phase = ctx.phase;
                 let opening = openings::lookup(self.game.history_san());
@@ -812,6 +927,95 @@ impl CoachSession {
         let ply = self.game.history_san().len() as u32;
         self.store_try(|s, id| s.record_chat(id, ply, "coach", false, &text));
         Ok(Some(text))
+    }
+
+    /// The opening the game is currently in, by longest-prefix match
+    /// against the book. Cheap and synchronous — the app polls it after
+    /// every move to title the board.
+    pub fn current_opening(&self) -> Option<crate::game::openings::Opening> {
+        openings::lookup(self.game.history_san())
+    }
+
+    /// Catch the student up after the coach was paused: one message
+    /// covering everything from `from_ply` half-moves to the current
+    /// position. `from_ply` is the history length when the coach last
+    /// spoke, so the window is `history[from_ply..]`.
+    ///
+    /// Pausing suppresses commentary, never judgment: `judge_student_move`
+    /// keeps running and recording, so the recap is built from real engine
+    /// verdicts for moves nobody commented on at the time. With a
+    /// `NullBackend` it degrades to the deterministic catch-up line, like
+    /// every other LLM path here.
+    pub async fn recap_since(&mut self, from_ply: u32) -> Result<String, CoachError> {
+        let history: Vec<String> = self.game.history_san().to_vec();
+        let from = (from_ply as usize).min(history.len());
+        let ply = history.len() as u32;
+        if from == history.len() {
+            // Unpaused without a move in between: nothing to narrate, and
+            // no reason to spend a model call saying so.
+            let text = "You're up to date, nothing has happened since I last spoke.".to_string();
+            self.store_try(|s, id| s.record_chat(id, ply, "coach", false, &text));
+            return Ok(text);
+        }
+
+        let judged = self.judged_moves_since(from);
+        // The eval before the window (when available) against the latest,
+        // both from the student's perspective.
+        let eval_span = if self.eval_history.len() >= 2 {
+            let start = self.eval_history.len().saturating_sub(judged.len() + 1);
+            self.eval_history
+                .last()
+                .map(|now| (self.eval_history[start], *now))
+        } else {
+            None
+        };
+
+        let phase = commentary::detect_phase(self.game.position());
+        let opening = openings::lookup(&history);
+        let situation = self.build_situation_report(phase, opening.as_ref());
+        let fallback = commentary::recap_fallback(&history, from, &judged, eval_span, phase);
+        if !self.narration_enabled {
+            // A stub backend would answer this with generic advice. The
+            // engine's own wording is specific about THIS stretch, which is
+            // the entire point of a catch-up.
+            self.store_try(|s, id| s.record_chat(id, ply, "coach", false, &fallback));
+            return Ok(fallback);
+        }
+        let facts = commentary::recap_report(&history, from, &judged, eval_span, &situation);
+
+        self.transcript.push(Message::user(format!(
+            "The student had you paused and has just switched you back on. Catch them up on \
+             the whole stretch in one short message: what they played, what went well, what \
+             slipped, and where the position stands now. Do not narrate every move — lead \
+             with the moment that mattered most. Here are the deterministic facts (engine + \
+             board; you may cite them directly):\n{facts}"
+        )));
+        let text = self.run_tool_loop(Some(fallback)).await?;
+        self.store_save_transcript();
+        self.store_try(|s, id| s.record_chat(id, ply, "coach", false, &text));
+        Ok(text)
+    }
+
+    /// The student's judged moves from `from` onward, read back out of the
+    /// store. Empty when the session has no store attached — the recap then
+    /// leans on the move list and the situation report alone.
+    fn judged_moves_since(&self, from: usize) -> Vec<commentary::RecapMove> {
+        let (Some(store), Some(id)) = (self.store.as_ref(), self.store_game_id) else {
+            return Vec::new();
+        };
+        let Ok(moves) = store.moves_for(id) else {
+            return Vec::new();
+        };
+        moves
+            .into_iter()
+            .filter(|m| m.by_student && (m.ply as usize) >= from)
+            .map(|m| commentary::RecapMove {
+                ply: m.ply as usize,
+                san: m.san,
+                judgment: m.judgment.as_deref().and_then(crate::store::judgment_from_str),
+                cp_loss: m.cp_loss,
+            })
+            .collect()
     }
 
     /// The full turn: judge, then comment.
@@ -931,6 +1135,8 @@ impl CoachSession {
             wins_material,
             motifs_against_student,
             phase: commentary::detect_phase(self.game.position()),
+            eval_for_student_cp: top.map(|l| l.score.as_cp()),
+            ply: self.game.history_san().len(),
         });
         Ok(())
     }
@@ -1008,7 +1214,14 @@ impl CoachSession {
                 None => json!({ "error": "no move has been played yet" }),
             }),
             "lookup_opening" => Ok(json!(openings::lookup(self.game.history_san()))),
-            "detect_motifs" => Ok(json!(motifs::detect(self.game.position()))),
+            // Capped: the detectors report every structural quirk of a
+            // position, and a 20-entry list buries the one tactic that
+            // matters. `detect_top` is priority-ordered, so the cut always
+            // keeps the sharpest findings.
+            "detect_motifs" => Ok(json!(motifs::detect_top(
+                self.game.position(),
+                MAX_REPORTED_MOTIFS
+            ))),
             "get_student_profile" => Ok(json!(self.profile)),
             "update_student_profile" => {
                 let concept = call.arguments["concept"].as_str().unwrap_or("unknown");
@@ -1194,7 +1407,8 @@ mod session_tests {
         let text = timeout(TEST_TIMEOUT, session.react_to_student_move())
             .await
             .expect("react timed out")
-            .unwrap();
+            .unwrap()
+            .expect("chatty always speaks");
         assert_eq!(text, "coached!");
         assert_eq!(model.calls.load(Ordering::SeqCst), 1, "full path calls the model once");
 
@@ -1229,7 +1443,8 @@ mod session_tests {
         let text = timeout(TEST_TIMEOUT, session.react_to_student_move())
             .await
             .expect("react timed out")
-            .unwrap();
+            .unwrap()
+            .expect("quiet speaks a canned line");
         assert_eq!(text, commentary::brief_line(&verdict, 1));
         assert_eq!(model.calls.load(Ordering::SeqCst), 0, "quiet brief path must not call the model");
     }
@@ -1246,9 +1461,106 @@ mod session_tests {
         let text = timeout(TEST_TIMEOUT, session.react_to_student_move())
             .await
             .expect("react timed out")
-            .unwrap();
+            .unwrap()
+            .expect("chatty always speaks");
         // Full decision + NullBackend → the expanded canned line, not a crash.
         assert_eq!(text, commentary::brief_line(&verdict, 1));
+    }
+
+    #[tokio::test]
+    async fn balanced_steady_move_is_silent_and_free() {
+        let model = CapturingModel::new();
+        let mut session = session_with(model.clone(), e4_script()).await;
+        session.set_commentary_style(CommentaryStyle::Balanced);
+
+        timeout(TEST_TIMEOUT, session.judge_student_move("e4"))
+            .await
+            .expect("judge timed out")
+            .unwrap();
+        let text = timeout(TEST_TIMEOUT, session.react_to_student_move())
+            .await
+            .expect("react timed out")
+            .unwrap();
+        assert_eq!(text, None, "a steady move must not interrupt");
+        assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn balanced_shift_recap_narrates_the_stretch() {
+        // e4 judged as a big eval drop: before +30, after +200 for Black →
+        // -200 for the student → blunder-class → a shift.
+        let script = vec![
+            vec![
+                "info depth 12 multipv 1 score cp 30 pv e2e4 e7e5 g1f3",
+                "bestmove e2e4",
+            ],
+            vec![
+                "info depth 12 multipv 1 score cp 200 pv e7e5 g1f3 b8c6",
+                "bestmove e7e5",
+            ],
+        ];
+        let model = CapturingModel::new();
+        let mut session = session_with(model.clone(), script).await;
+        session.set_commentary_style(CommentaryStyle::Balanced);
+
+        timeout(TEST_TIMEOUT, session.judge_student_move("e4"))
+            .await
+            .expect("judge timed out")
+            .unwrap();
+        let text = timeout(TEST_TIMEOUT, session.react_to_student_move())
+            .await
+            .expect("react timed out")
+            .unwrap()
+            .expect("a shift speaks");
+        assert_eq!(text, "coached!");
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+
+        let req = model.last_request.lock().unwrap().clone().expect("request captured");
+        let user_msg = &req.messages.last().expect("has messages").content;
+        assert!(
+            user_msg.contains("shifted significantly"),
+            "prompt must frame the shift:\n{user_msg}"
+        );
+        assert!(
+            user_msg.contains("Moves: 1. e4"),
+            "prompt must carry the stretch:\n{user_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn balanced_shift_recap_without_narration_uses_fallback() {
+        let script = vec![
+            vec![
+                "info depth 12 multipv 1 score cp 30 pv e2e4 e7e5 g1f3",
+                "bestmove e2e4",
+            ],
+            vec![
+                "info depth 12 multipv 1 score cp 200 pv e7e5 g1f3 b8c6",
+                "bestmove e7e5",
+            ],
+        ];
+        let model = CapturingModel::new();
+        let mut session = session_with(model.clone(), script).await;
+        session.set_commentary_style(CommentaryStyle::Balanced);
+        session.set_narration(false);
+
+        timeout(TEST_TIMEOUT, session.judge_student_move("e4"))
+            .await
+            .expect("judge timed out")
+            .unwrap();
+        let text = timeout(TEST_TIMEOUT, session.react_to_student_move())
+            .await
+            .expect("react timed out")
+            .unwrap()
+            .expect("a shift speaks even without narration");
+        // No store is attached in this test, so the window has no judged
+        // moves and no eval span: the fallback must not claim a direction.
+        assert!(
+            text.contains("The game just took a turn"),
+            "fallback wording expected, got: {text}"
+        );
+        assert!(text.contains("1. e4"), "fallback names the stretch: {text}");
+        assert_eq!(model.calls.load(Ordering::SeqCst), 0, "no model call without narration");
     }
 
     #[tokio::test]

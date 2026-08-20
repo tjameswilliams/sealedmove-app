@@ -100,6 +100,19 @@ impl BoardHandle {
         serde_json::to_string(&self.lock().material_summary())
             .expect("MaterialSummary serializes")
     }
+
+    /// The opening this move history matches, as JSON (`eco`, `name`,
+    /// `matched_plies`), or `None` once the game leaves the book.
+    ///
+    /// It lives on the board mirror rather than the session on purpose: the
+    /// UI redraws the opening name after every move, and a hash lookup on
+    /// the mirror never waits on the session's mutex behind a running
+    /// engine search.
+    pub fn current_opening(&self) -> Option<String> {
+        let board = self.lock();
+        let opening = coach_core::game::openings::lookup(board.history_san())?;
+        serde_json::to_string(&opening).ok()
+    }
 }
 
 #[cfg(test)]

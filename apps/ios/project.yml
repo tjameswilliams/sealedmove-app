@@ -53,8 +53,8 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
         INFOPLIST_KEY_UIRequiresFullScreen: YES
-        CURRENT_PROJECT_VERSION: 2
-        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 3
+        MARKETING_VERSION: "0.2.0"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         # Automatic signing for device runs; the DEVELOPMENT_TEAM comes from

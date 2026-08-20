@@ -170,6 +170,9 @@ final class GameViewModel {
     private var liveMaterial: MaterialSummaryInfo = .empty
     /// Human-readable result once the game is over.
     private(set) var outcomeText: String?
+    /// Result of the most recently finished game, read by the rating
+    /// prompt: asking straight after a loss farms one-star ratings.
+    private(set) var lastGameWasLoss = false
     private(set) var whiteToMove = true
 
     // MARK: Review mode (rewind)
@@ -244,6 +247,47 @@ final class GameViewModel {
     var chatDraft = ""
     /// Set when the game ends; drives the summary sheet.
     var gameSummary: GameSummaryInfo?
+
+    // MARK: Pause
+
+    /// The coach is paused: it stops volunteering commentary on both sides'
+    /// moves. It keeps JUDGING them — the engine verdict is free, and the
+    /// chip, the accuracy stats, the rating estimate, and the post-game
+    /// review all depend on it. Answers to direct questions are never
+    /// paused. Persisted, so the setting survives relaunch.
+    private(set) var isCoachPaused = UserDefaults.standard.bool(forKey: pausedKey)
+    /// Move count when the coach last said something unprompted — the start
+    /// of the window `recapSince` catches the student up on.
+    private var lastCommentedPly = 0
+    /// A recap is in flight after unpausing.
+    private(set) var isRecapping = false
+
+    static let pausedKey = "coach.paused"
+
+    // MARK: Opening
+
+    /// The opening the live game currently matches, refreshed after every
+    /// move. Drives the board's status strip.
+    private(set) var currentOpening: OpeningInfo?
+
+    // MARK: Review
+
+    /// Which game a review is about. The session builds one review at a
+    /// time, so a sheet opened for a past game must be able to tell that
+    /// the review in hand belongs to a different game.
+    enum ReviewSubject: Equatable {
+        case liveGame
+        case storedGame(Int64)
+    }
+
+    /// What `gameReview` is a review OF, or nil when there is none.
+    private(set) var reviewSubject: ReviewSubject?
+    /// The finished review, once one has been requested and built.
+    var gameReview: GameReviewInfo?
+    /// A whole-game review is running (seconds to tens of seconds).
+    private(set) var isBuildingReview = false
+    /// Set when a review attempt failed, for the sheet to show.
+    private(set) var reviewError: String?
     /// The Pro Coach trial has lapsed (proxy rejection, or detected at
     /// launch) — the game screen presents the trial-expiry sheet offering
     /// the subscription or the free on-device coach.
@@ -269,13 +313,21 @@ final class GameViewModel {
 
     // MARK: - Init
 
+    /// The on-device coach is the canned stub (no Apple Intelligence on
+    /// this device). It answers every prompt from a fixed pool, so anything
+    /// that needs prose ABOUT this game has to use the engine's own wording
+    /// instead — see `setNarration`.
+    private let onDeviceIsStub: Bool
+
     init() {
         if FoundationModelsCoach.isAvailable {
             coach = FoundationModelsCoach()
             onDeviceBackendName = "Apple Foundation Models"
+            onDeviceIsStub = false
         } else {
             coach = CannedCoachModel()
             onDeviceBackendName = "Canned coach"
+            onDeviceIsStub = true
         }
         statusLine = "Starting embedded engine…"
         refresh()
@@ -285,6 +337,7 @@ final class GameViewModel {
     private func startSession() {
         let coach = self.coach
         let level = LevelProgress.current
+        let canNarrate = !onDeviceIsStub
         sessionQueue.async { [weak self] in
             // The app's chosen band is patched into the profile handed to
             // the session (or a fresh default profile at that band), so the
@@ -327,9 +380,14 @@ final class GameViewModel {
             }
 
             // Apply the persisted chattiness once the session (fresh or
-            // resumed) is up — the Rust policy defaults to Balanced, the
-            // app's default is Chatty.
+            // resumed) is up (both the Rust policy and the app default to
+            // Balanced, but the student may have chosen otherwise).
             handle?.setCommentaryStyle(style: CoachChattiness.load().ffiStyle)
+            // The recap and the review write about THIS game, so they fall
+            // back to the engine's own wording when the on-device coach is
+            // the canned stub. `restoreSavedBackend` re-applies this if the
+            // session switches to Pro Coach.
+            handle?.setNarration(enabled: canNarrate)
 
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -400,6 +458,11 @@ final class GameViewModel {
             persistFeed(role: "system", text: line)
         }
         coachFeed = Array(coachFeed.suffix(Self.feedLimit))
+        // Resuming paused mid-game: the catch-up window picks up where the
+        // coach actually left off, so the moves played before the app quit
+        // are still recapped.
+        lastCommentedPly = report.chat.last(where: { $0.role == "coach" })
+            .map { Int($0.atPly) } ?? report.historySan.count
 
         // If the app died between the student's move and the opponent's
         // reply, it is Black's turn on resume — let the opponent move, or
@@ -415,11 +478,12 @@ final class GameViewModel {
         guard let session else { return }
         isPipelineRunning = true
         isBotThinking = true
+        let paused = isCoachPaused
         sessionQueue.async { [weak self] in
             let reply = try? session.opponentReply()
             let fenAfterReply = session.fen()
             // Opponent commentary (auto-recorded by the Rust session).
-            let note = (reply ?? nil) != nil
+            let note = !paused && (reply ?? nil) != nil
                 ? (try? session.reactToOpponentMove()) ?? nil : nil
             let over = session.isGameOver()
             if over { self?.finishGameOnQueue(session: session) }
@@ -484,9 +548,11 @@ final class GameViewModel {
         }
         let coach = self.coach
         let backendLabel = settings.backendLabel(onDeviceName: onDeviceBackendName)
+        let canNarrate = !onDeviceIsStub
 
         sessionQueue.async { [weak self] in
             session.setBackendForeign(model: coach)
+            session.setNarration(enabled: canNarrate)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.activeProvider = settings.provider
@@ -564,6 +630,8 @@ final class GameViewModel {
                     baseUrl: ProCoachAccount.baseURL + "/v1",
                     apiKey: token,
                     model: ProCoachAccount.model)
+                // A real model: the recap and the review get real prose.
+                session.setNarration(enabled: true)
                 DispatchQueue.main.async {
                     self.activeProvider = .proCoach
                     // No model name here on purpose — which model backs the
@@ -777,6 +845,8 @@ final class GameViewModel {
                 session: session, result: .loss, outcome: "You resigned — 0-1")
             DispatchQueue.main.async {
                 self.isPipelineRunning = false
+                self.lastGameWasLoss = true
+                RatingPrompt.recordCompletedGame()
                 self.outcomeText = "You resigned — 0-1"
                 self.gameSummary = summary
                 self.pushCoach(Self.wrapUpLine(result: .loss, summary: summary))
@@ -902,6 +972,121 @@ final class GameViewModel {
             DispatchQueue.main.async {
                 self?.isCoachThinking = false
                 self?.pushCoach(reply, isReview: reviewing)
+            }
+        }
+    }
+
+    // MARK: - Pause / resume
+
+    /// Flip the coach between talking and keeping quiet. Pausing is
+    /// silent; resuming spends one model call catching the student up on
+    /// everything that happened in between.
+    func togglePause() {
+        if isCoachPaused {
+            resumeCoach()
+        } else {
+            pauseCoach()
+        }
+    }
+
+    private func pauseCoach() {
+        isCoachPaused = true
+        UserDefaults.standard.set(true, forKey: Self.pausedKey)
+        // The catch-up window opens here, not at the last thing the coach
+        // happened to say: everything before this point was already heard.
+        lastCommentedPly = moves.count
+        let line = "Coach paused. I'm still checking every move with the engine, "
+            + "just not talking about it. Ask me anything any time."
+        pushMessage(role: .system, text: line)
+        persistFeed(role: "system", text: line)
+    }
+
+    private func resumeCoach() {
+        isCoachPaused = false
+        UserDefaults.standard.set(false, forKey: Self.pausedKey)
+        let missed = moves.count - lastCommentedPly
+        guard let session, sessionReady, missed > 0 else {
+            let line = "Coach back on."
+            pushMessage(role: .system, text: line)
+            persistFeed(role: "system", text: line)
+            return
+        }
+        let from = UInt32(max(0, lastCommentedPly))
+        isRecapping = true
+        isCoachThinking = true
+        sessionQueue.async { [weak self] in
+            let text: String
+            do {
+                // Auto-recorded by the Rust session; do NOT logFeed it again.
+                text = try session.recapSince(fromPly: from)
+            } catch {
+                text = "I'm back. I couldn't put the catch-up together, though: "
+                    + error.localizedDescription
+                session.logFeed(role: "coach", isReview: false, text: text)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isRecapping = false
+                self.isCoachThinking = false
+                self.pushCoach(text)
+            }
+        }
+    }
+
+    // MARK: - Game review
+
+    /// Build a whole-game review of the game on the board. Slow (the engine
+    /// sweeps every position, then re-searches the turning points), so the
+    /// caller shows progress; the result lands in `gameReview`.
+    func requestReview() {
+        requestReview(subject: .liveGame, moves: moves, startingFen: nil, studentIsWhite: true)
+    }
+
+    /// Same, for a game out of the history store. The live game is never
+    /// touched — the session analyzes the passed move list on a scratch
+    /// board — so this is safe to run mid-game.
+    func requestReview(
+        storedGame id: Int64, moves: [String], startingFen: String?, studentIsWhite: Bool
+    ) {
+        requestReview(subject: .storedGame(id), moves: moves,
+                      startingFen: startingFen, studentIsWhite: studentIsWhite)
+    }
+
+    private func requestReview(
+        subject: ReviewSubject, moves: [String], startingFen: String?, studentIsWhite: Bool
+    ) {
+        guard let session, sessionReady, !isBuildingReview, !moves.isEmpty else { return }
+        isBuildingReview = true
+        reviewError = nil
+        // Drop any review of a different game up front, so the sheet shows
+        // progress rather than someone else's game while this one builds.
+        if reviewSubject != subject {
+            gameReview = nil
+            reviewSubject = nil
+        }
+        sessionQueue.async { [weak self] in
+            let json: String?
+            var failure: String?
+            do {
+                json = try session.reviewMoves(
+                    moves: moves, startingFen: startingFen, studentIsWhite: studentIsWhite)
+            } catch {
+                json = nil
+                failure = error.localizedDescription
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isBuildingReview = false
+                guard let json, var review = Self.decodeReview(json) else {
+                    self.reviewError = failure
+                        ?? "The review came back in a shape I couldn't read."
+                    return
+                }
+                // The move list rides along so the sheet can replay the game
+                // without going back to the store.
+                review.moves = moves
+                self.gameReview = review
+                self.reviewSubject = subject
             }
         }
     }
@@ -1050,6 +1235,10 @@ final class GameViewModel {
     private func runPipeline(studentSan san: String, to toSquare: String) {
         guard let session else { return }
         isPipelineRunning = true
+        // Captured once, on the main thread: a pause toggled mid-pipeline
+        // takes effect from the NEXT move, so one move never gets half a
+        // reaction.
+        let paused = isCoachPaused
 
         sessionQueue.async { [weak self] in
             func onMain(_ work: @escaping (GameViewModel) -> Void) {
@@ -1085,32 +1274,41 @@ final class GameViewModel {
             }
 
             // 2. Commentary: the Rust commentary policy owns the cadence —
-            //    canned line or full LLM reaction, per the chattiness
-            //    setting. The reply auto-records to the store; do NOT
-            //    logFeed it again. The "Coach is thinking…" indicator only
-            //    appears when the reply takes >300ms, so canned lines feel
-            //    instant. LLM failures degrade to the engine-verdict line
-            //    plus a friendly note — never a crash.
-            let showThinking = DispatchWorkItem { [weak self] in
-                self?.isCoachThinking = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: showThinking)
-            var text: String
-            var failureNote: String?
-            do {
-                text = try session.reactToStudentMove()
-            } catch {
-                text = session.briefReaction()
-                failureNote = "(The coach model couldn't respond — showing the engine's take instead. \(error.localizedDescription))"
-                session.logFeed(role: "coach", isReview: false, text: text)
-                session.logFeed(role: "system", isReview: false, text: failureNote!)
-            }
-            showThinking.cancel()
-            onMain { model in
-                model.isCoachThinking = false
-                model.pushCoach(text)
-                if let failureNote {
-                    model.pushCoach(failureNote)
+            //    silence (Balanced, while the game holds steady), a canned
+            //    line, a full LLM reaction, or a shift recap, per the
+            //    chattiness setting. The reply auto-records to the store;
+            //    do NOT logFeed it again. The "Coach is thinking…"
+            //    indicator only appears when the reply takes >300ms, so
+            //    canned lines feel instant. LLM failures degrade to the
+            //    engine-verdict line plus a friendly note, never a crash.
+            //
+            //    Skipped entirely while paused. Step 1 still ran, so the
+            //    verdict chip, the accuracy stats, and the recap the
+            //    student gets on unpausing all stay whole.
+            if !paused {
+                let showThinking = DispatchWorkItem { [weak self] in
+                    self?.isCoachThinking = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: showThinking)
+                var text: String?
+                var failureNote: String?
+                do {
+                    text = try session.reactToStudentMove()
+                } catch {
+                    text = session.briefReaction()
+                    failureNote = "(The coach model couldn't respond — showing the engine's take instead. \(error.localizedDescription))"
+                    session.logFeed(role: "coach", isReview: false, text: text!)
+                    session.logFeed(role: "system", isReview: false, text: failureNote!)
+                }
+                showThinking.cancel()
+                onMain { model in
+                    model.isCoachThinking = false
+                    if let text {
+                        model.pushCoach(text)
+                    }
+                    if let failureNote {
+                        model.pushCoach(failureNote)
+                    }
                 }
             }
 
@@ -1135,8 +1333,10 @@ final class GameViewModel {
             // 4b. Opponent commentary: the policy speaks only when there is
             //     something worth flagging (threat, phase change, game
             //     summary) — nil means silence. Auto-recorded by the Rust
-            //     session; rendered as a distinct "watch out" note.
-            if (reply ?? nil) != nil, let note = (try? session.reactToOpponentMove()) ?? nil {
+            //     session; rendered as a distinct "watch out" note. Also
+            //     suppressed while paused.
+            if !paused, (reply ?? nil) != nil,
+               let note = (try? session.reactToOpponentMove()) ?? nil {
                 onMain { $0.pushMessage(role: .note, text: note) }
             }
 
@@ -1182,6 +1382,8 @@ final class GameViewModel {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.lastGameWasLoss = (result == .loss)
+            RatingPrompt.recordCompletedGame()
             self.gameSummary = summary
             self.pushCoach(Self.wrapUpLine(result: result, summary: summary))
             self.applyLevelEvent(event)
@@ -1221,6 +1423,12 @@ final class GameViewModel {
         liveVerdictJudgment = nil
         exitReview()
         coachFeed = []
+        // Fresh game: nothing to catch up on, and last game's review is no
+        // longer about the board in front of the student.
+        lastCommentedPly = 0
+        gameReview = nil
+        reviewSubject = nil
+        reviewError = nil
         pushCoach("Fresh board — you're White. Your move!")
         persistFeed(role: "coach", text: "Fresh board — you're White. Your move!")
         announcePlacementIfPending()
@@ -1253,6 +1461,9 @@ final class GameViewModel {
         outcomeText = board.outcomeText()
         whiteToMove = board.turnWhite()
         liveMaterial = Self.decodeMaterial(board.materialSummary())
+        // A hash lookup on the mirror, never the session: the status strip
+        // redraws on every move and must not wait on an engine search.
+        currentOpening = board.currentOpening().flatMap(Self.decodeOpening)
     }
 
     // MARK: - Feed
@@ -1270,6 +1481,7 @@ final class GameViewModel {
         coachFeed.append(CoachMessage(role: .coach, text: text, isReview: isReview,
                                       fen: ctx.fen, ply: ctx.ply))
         coachFeed = Array(coachFeed.suffix(Self.feedLimit))
+        markCommented(isReview: isReview)
     }
 
     fileprivate func pushMessage(role: CoachMessage.Role, text: String) {
@@ -1277,6 +1489,15 @@ final class GameViewModel {
         coachFeed.append(CoachMessage(role: role, text: text,
                                       fen: ctx.fen, ply: ctx.ply))
         coachFeed = Array(coachFeed.suffix(Self.feedLimit))
+        if role == .note { markCommented(isReview: false) }
+    }
+
+    /// The coach has now spoken about the live position, so a later recap
+    /// starts here. Messages about a REWOUND position say nothing about the
+    /// moves since, so they leave the window alone.
+    private func markCommented(isReview: Bool) {
+        guard !isReview, !isReviewing else { return }
+        lastCommentedPly = moves.count
     }
 
     private func pushStudent(_ text: String, isReview: Bool = false) {
@@ -1326,6 +1547,14 @@ final class GameViewModel {
 
     static func decodeMaterial(_ json: String) -> MaterialSummaryInfo {
         (try? snakeDecoder().decode(MaterialSummaryInfo.self, from: Data(json.utf8))) ?? .empty
+    }
+
+    static func decodeOpening(_ json: String) -> OpeningInfo? {
+        try? snakeDecoder().decode(OpeningInfo.self, from: Data(json.utf8))
+    }
+
+    static func decodeReview(_ json: String) -> GameReviewInfo? {
+        try? snakeDecoder().decode(GameReviewInfo.self, from: Data(json.utf8))
     }
 
     // MARK: - Profile persistence

@@ -39,8 +39,9 @@ pub enum FfiCommentaryStyle {
     /// LLM only on notable moves (inaccuracy/mistake/blunder), canned lines
     /// otherwise, no opponent or game-arc commentary.
     Quiet,
-    /// Full reactions on notable moves and milestones, periodic "why that
-    /// was good" notes, opponent commentary on real threats/big swings.
+    /// Shift-triggered: silent until the game significantly shifts (eval
+    /// drift, mistake/blunder, forced mate), then one recap of the stretch
+    /// of moves that led to the swing.
     Balanced,
     /// Full reaction to every student move; opponent commentary whenever
     /// anything is worth flagging; frequent development summaries.
@@ -341,11 +342,12 @@ impl CoachSessionHandle {
     }
 
     /// React to the student's most recent judged move at the cadence the
-    /// commentary policy dictates: a canned line for quiet moves, the full
-    /// LLM reaction (situation report + focus instructions) otherwise.
-    /// Auto-records to the store's chat feed either way — do not `log_feed`
-    /// the result again.
-    pub fn react_to_student_move(&self) -> Result<String, FfiError> {
+    /// commentary policy dictates: `None` when the policy stays silent
+    /// (Balanced, while the game holds steady), a canned line for quiet
+    /// moves, the full LLM reaction (situation report + focus instructions)
+    /// or a shift recap otherwise. Auto-records to the store's chat feed
+    /// whenever it speaks; do not `log_feed` the result again.
+    pub fn react_to_student_move(&self) -> Result<Option<String>, FfiError> {
         let mut session = self.lock();
         Ok(RUNTIME.block_on(session.react_to_student_move())?)
     }
@@ -358,6 +360,67 @@ impl CoachSessionHandle {
     pub fn react_to_opponent_move(&self) -> Result<Option<String>, FfiError> {
         let mut session = self.lock();
         Ok(RUNTIME.block_on(session.react_to_opponent_move())?)
+    }
+
+    /// Declare whether the current backend can narrate a supplied set of
+    /// facts. Set it false for stub/canned backends: the catch-up recap and
+    /// the game review then use the engine's own deterministic wording,
+    /// which is specific about the actual game, instead of the generic
+    /// advice a stub returns. Re-apply it after every backend switch.
+    pub fn set_narration(&self, enabled: bool) {
+        self.lock().set_narration(enabled);
+    }
+
+    /// Catch the student up after the coach was paused: one message
+    /// covering everything from `from_ply` half-moves to now. `from_ply` is
+    /// the move count when the coach last spoke, so the window is the moves
+    /// after that. Returns a short "you're up to date" line without calling
+    /// the model when no move was played in between. Auto-records to the
+    /// store's chat feed — do not `log_feed` the result again.
+    pub fn recap_since(&self, from_ply: u32) -> Result<String, FfiError> {
+        let mut session = self.lock();
+        Ok(RUNTIME.block_on(session.recap_since(from_ply))?)
+    }
+
+    /// Whole-game review of the game on the board, as JSON (`GameReview`:
+    /// headline, summary, strengths, weaknesses, accuracy, and the
+    /// engine-anchored `moments`, each carrying the ply, both FENs, evals,
+    /// the engine's preferred line, and the coach's note).
+    ///
+    /// SLOW: this sweeps every position at scan depth and re-searches the
+    /// hotspots at full depth, so it runs for seconds to tens of seconds on
+    /// a long game. Call it off the main thread and show progress.
+    pub fn review_game(&self) -> Result<String, FfiError> {
+        let mut session = self.lock();
+        let review = RUNTIME.block_on(session.review_current_game())?;
+        Ok(serde_json::to_string(&review)?)
+    }
+
+    /// Same review, for a game that is no longer on the board — pass the
+    /// SAN move list (and the starting FEN, if it was not the standard
+    /// start) straight out of the store. The live game is untouched, so a
+    /// student can review last week's game mid-game.
+    ///
+    /// SLOW, exactly as [`Self::review_game`].
+    pub fn review_moves(
+        &self,
+        moves: Vec<String>,
+        starting_fen: Option<String>,
+        student_is_white: bool,
+    ) -> Result<String, FfiError> {
+        let student = if student_is_white {
+            coach_core::Color::White
+        } else {
+            coach_core::Color::Black
+        };
+        let mut session = self.lock();
+        let review = RUNTIME.block_on(session.review_moves(
+            &moves,
+            starting_fen.as_deref(),
+            student,
+            coach_core::coach::review::DEFAULT_MAX_MOMENTS,
+        ))?;
+        Ok(serde_json::to_string(&review)?)
     }
 
     /// Close out the game: update the student profile (rating EMA, win

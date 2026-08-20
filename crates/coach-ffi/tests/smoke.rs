@@ -141,7 +141,8 @@ fn commentary_surface_engine_only() {
     handle.judge_move("e4".into()).expect("judge_move");
     let reaction = handle
         .react_to_student_move()
-        .expect("react_to_student_move");
+        .expect("react_to_student_move")
+        .expect("chatty always speaks");
     assert!(reaction.contains("e4"), "reaction cites the move: {reaction}");
 
     // No opponent move has landed yet — the policy has no context and must

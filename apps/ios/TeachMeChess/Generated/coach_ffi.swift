@@ -541,6 +541,17 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol BoardHandleProtocol: AnyObject, Sendable {
     
     /**
+     * The opening this move history matches, as JSON (`eco`, `name`,
+     * `matched_plies`), or `None` once the game leaves the book.
+     *
+     * It lives on the board mirror rather than the session on purpose: the
+     * UI redraws the opening name after every move, and a hash lookup on
+     * the mirror never waits on the session's mutex behind a running
+     * engine search.
+     */
+    func currentOpening()  -> String?
+    
+    /**
      * Current position as FEN.
      */
     func fen()  -> String
@@ -673,6 +684,22 @@ public static func fromFen(fen: String)throws  -> BoardHandle  {
 }
     
 
+    
+    /**
+     * The opening this move history matches, as JSON (`eco`, `name`,
+     * `matched_plies`), or `None` once the game leaves the book.
+     *
+     * It lives on the board mirror rather than the session on purpose: the
+     * UI redraws the opening name after every move, and a hash lookup on
+     * the mirror never waits on the session's mutex behind a running
+     * engine search.
+     */
+open func currentOpening() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_coach_ffi_fn_method_boardhandle_current_opening(self.uniffiClonePointer(),$0
+    )
+})
+}
     
     /**
      * Current position as FEN.
@@ -961,12 +988,23 @@ public protocol CoachSessionHandleProtocol: AnyObject, Sendable {
     
     /**
      * React to the student's most recent judged move at the cadence the
-     * commentary policy dictates: a canned line for quiet moves, the full
-     * LLM reaction (situation report + focus instructions) otherwise.
-     * Auto-records to the store's chat feed either way — do not `log_feed`
-     * the result again.
+     * commentary policy dictates: `None` when the policy stays silent
+     * (Balanced, while the game holds steady), a canned line for quiet
+     * moves, the full LLM reaction (situation report + focus instructions)
+     * or a shift recap otherwise. Auto-records to the store's chat feed
+     * whenever it speaks; do not `log_feed` the result again.
      */
-    func reactToStudentMove() throws  -> String
+    func reactToStudentMove() throws  -> String?
+    
+    /**
+     * Catch the student up after the coach was paused: one message
+     * covering everything from `from_ply` half-moves to now. `from_ply` is
+     * the move count when the coach last spoke, so the window is the moves
+     * after that. Returns a short "you're up to date" line without calling
+     * the model when no move was played in between. Auto-records to the
+     * store's chat feed — do not `log_feed` the result again.
+     */
+    func recapSince(fromPly: UInt32) throws  -> String
     
     /**
      * Start a fresh game in place: new board (standard start, or `fen`),
@@ -989,6 +1027,28 @@ public protocol CoachSessionHandleProtocol: AnyObject, Sendable {
      * and treated as "no open game" — this never errors over stale data.
      */
     func resumeFromStore(dbPath: String) throws  -> String?
+    
+    /**
+     * Whole-game review of the game on the board, as JSON (`GameReview`:
+     * headline, summary, strengths, weaknesses, accuracy, and the
+     * engine-anchored `moments`, each carrying the ply, both FENs, evals,
+     * the engine's preferred line, and the coach's note).
+     *
+     * SLOW: this sweeps every position at scan depth and re-searches the
+     * hotspots at full depth, so it runs for seconds to tens of seconds on
+     * a long game. Call it off the main thread and show progress.
+     */
+    func reviewGame() throws  -> String
+    
+    /**
+     * Same review, for a game that is no longer on the board — pass the
+     * SAN move list (and the starting FEN, if it was not the standard
+     * start) straight out of the store. The live game is untouched, so a
+     * student can review last week's game mid-game.
+     *
+     * SLOW, exactly as [`Self::review_game`].
+     */
+    func reviewMoves(moves: [String], startingFen: String?, studentIsWhite: Bool) throws  -> String
     
     /**
      * Swap the coach's LLM backend at runtime to the native Anthropic API.
@@ -1026,6 +1086,15 @@ public protocol CoachSessionHandleProtocol: AnyObject, Sendable {
      * effect from the next reaction.
      */
     func setCommentaryStyle(style: FfiCommentaryStyle) 
+    
+    /**
+     * Declare whether the current backend can narrate a supplied set of
+     * facts. Set it false for stub/canned backends: the catch-up recap and
+     * the game review then use the engine's own deterministic wording,
+     * which is specific about the actual game, instead of the generic
+     * advice a stub returns. Re-apply it after every backend switch.
+     */
+    func setNarration(enabled: Bool) 
     
     /**
      * Cumulative session cost counters as JSON (`SessionStats`).
@@ -1423,14 +1492,31 @@ open func reactToOpponentMove()throws  -> String?  {
     
     /**
      * React to the student's most recent judged move at the cadence the
-     * commentary policy dictates: a canned line for quiet moves, the full
-     * LLM reaction (situation report + focus instructions) otherwise.
-     * Auto-records to the store's chat feed either way — do not `log_feed`
-     * the result again.
+     * commentary policy dictates: `None` when the policy stays silent
+     * (Balanced, while the game holds steady), a canned line for quiet
+     * moves, the full LLM reaction (situation report + focus instructions)
+     * or a shift recap otherwise. Auto-records to the store's chat feed
+     * whenever it speaks; do not `log_feed` the result again.
      */
-open func reactToStudentMove()throws  -> String  {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+open func reactToStudentMove()throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
     uniffi_coach_ffi_fn_method_coachsessionhandle_react_to_student_move(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Catch the student up after the coach was paused: one message
+     * covering everything from `from_ply` half-moves to now. `from_ply` is
+     * the move count when the coach last spoke, so the window is the moves
+     * after that. Returns a short "you're up to date" line without calling
+     * the model when no move was played in between. Auto-records to the
+     * store's chat feed — do not `log_feed` the result again.
+     */
+open func recapSince(fromPly: UInt32)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_coach_ffi_fn_method_coachsessionhandle_recap_since(self.uniffiClonePointer(),
+        FfiConverterUInt32.lower(fromPly),$0
     )
 })
 }
@@ -1464,6 +1550,41 @@ open func resumeFromStore(dbPath: String)throws  -> String?  {
     return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
     uniffi_coach_ffi_fn_method_coachsessionhandle_resume_from_store(self.uniffiClonePointer(),
         FfiConverterString.lower(dbPath),$0
+    )
+})
+}
+    
+    /**
+     * Whole-game review of the game on the board, as JSON (`GameReview`:
+     * headline, summary, strengths, weaknesses, accuracy, and the
+     * engine-anchored `moments`, each carrying the ply, both FENs, evals,
+     * the engine's preferred line, and the coach's note).
+     *
+     * SLOW: this sweeps every position at scan depth and re-searches the
+     * hotspots at full depth, so it runs for seconds to tens of seconds on
+     * a long game. Call it off the main thread and show progress.
+     */
+open func reviewGame()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_coach_ffi_fn_method_coachsessionhandle_review_game(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Same review, for a game that is no longer on the board — pass the
+     * SAN move list (and the starting FEN, if it was not the standard
+     * start) straight out of the store. The live game is untouched, so a
+     * student can review last week's game mid-game.
+     *
+     * SLOW, exactly as [`Self::review_game`].
+     */
+open func reviewMoves(moves: [String], startingFen: String?, studentIsWhite: Bool)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_coach_ffi_fn_method_coachsessionhandle_review_moves(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(moves),
+        FfiConverterOptionString.lower(startingFen),
+        FfiConverterBool.lower(studentIsWhite),$0
     )
 })
 }
@@ -1528,6 +1649,20 @@ open func setBackendOpenai(baseUrl: String, apiKey: String?, model: String)  {tr
 open func setCommentaryStyle(style: FfiCommentaryStyle)  {try! rustCall() {
     uniffi_coach_ffi_fn_method_coachsessionhandle_set_commentary_style(self.uniffiClonePointer(),
         FfiConverterTypeFfiCommentaryStyle_lower(style),$0
+    )
+}
+}
+    
+    /**
+     * Declare whether the current backend can narrate a supplied set of
+     * facts. Set it false for stub/canned backends: the catch-up recap and
+     * the game review then use the engine's own deterministic wording,
+     * which is specific about the actual game, instead of the generic
+     * advice a stub returns. Re-apply it after every backend switch.
+     */
+open func setNarration(enabled: Bool)  {try! rustCall() {
+    uniffi_coach_ffi_fn_method_coachsessionhandle_set_narration(self.uniffiClonePointer(),
+        FfiConverterBool.lower(enabled),$0
     )
 }
 }
@@ -1937,8 +2072,9 @@ public enum FfiCommentaryStyle {
      */
     case quiet
     /**
-     * Full reactions on notable moves and milestones, periodic "why that
-     * was good" notes, opponent commentary on real threats/big swings.
+     * Shift-triggered: silent until the game significantly shifts (eval
+     * drift, mistake/blunder, forced mate), then one recap of the stretch
+     * of moves that led to the swing.
      */
     case balanced
     /**
@@ -2365,6 +2501,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_coach_ffi_checksum_func_version() != 23444) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_coach_ffi_checksum_method_boardhandle_current_opening() != 42326) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_coach_ffi_checksum_method_boardhandle_fen() != 14480) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2446,13 +2585,22 @@ private let initializationResult: InitializationResult = {
     if (uniffi_coach_ffi_checksum_method_coachsessionhandle_react_to_opponent_move() != 29203) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_coach_ffi_checksum_method_coachsessionhandle_react_to_student_move() != 34019) {
+    if (uniffi_coach_ffi_checksum_method_coachsessionhandle_react_to_student_move() != 22616) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_coach_ffi_checksum_method_coachsessionhandle_recap_since() != 47878) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_coach_ffi_checksum_method_coachsessionhandle_reset_game() != 9307) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_coach_ffi_checksum_method_coachsessionhandle_resume_from_store() != 60051) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_coach_ffi_checksum_method_coachsessionhandle_review_game() != 38080) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_coach_ffi_checksum_method_coachsessionhandle_review_moves() != 8361) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_coach_ffi_checksum_method_coachsessionhandle_set_backend_anthropic() != 11656) {
@@ -2468,6 +2616,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_coach_ffi_checksum_method_coachsessionhandle_set_commentary_style() != 4556) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_coach_ffi_checksum_method_coachsessionhandle_set_narration() != 55563) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_coach_ffi_checksum_method_coachsessionhandle_stats_json() != 45990) {

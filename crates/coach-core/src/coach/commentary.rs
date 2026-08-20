@@ -22,11 +22,12 @@ pub enum CommentaryStyle {
     /// (inaccuracy/mistake/blunder); everything else gets a canned line; no
     /// opponent or game-arc commentary at all.
     Quiet,
-    /// Full LLM reaction on notable moves and milestones; brief canned
-    /// encouragement on ordinary good moves with a full "why that was good"
-    /// reaction every 3rd good move; opponent commentary only on a real
-    /// threat or a big eval swing; a development summary every ~10 full
-    /// moves and on phase transitions.
+    /// Shift-triggered: the coach stays silent until the engine decides the
+    /// game has significantly shifted (the eval has drifted
+    /// [`SHIFT_THRESHOLD_CP`] since the coach last spoke, a mistake/blunder
+    /// landed, or a forced mate appeared). It then recaps the stretch of
+    /// moves that led to the swing in one message instead of interrupting
+    /// on every move.
     #[default]
     Balanced,
     /// Full LLM reaction to every student move; opponent commentary whenever
@@ -64,14 +65,22 @@ pub enum Focus {
     Milestone(MilestoneKind),
 }
 
-/// The policy's answer: say nothing, use a canned line, or invoke the LLM
-/// with the given focuses.
+/// The policy's answer: say nothing, use a canned line, invoke the LLM with
+/// the given focuses, or recap the stretch that led to a significant shift.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
     Silent,
     Brief,
     Full(Vec<Focus>),
+    /// Balanced only: the game has significantly shifted since the coach
+    /// last spoke. `from_ply` is the 0-based half-move index of the last
+    /// comment; the recap window is `history[from_ply..]`.
+    ShiftRecap { from_ply: usize },
 }
+
+/// Eval drift (centipawns, student's perspective) since the coach last
+/// spoke that Balanced counts as "the game has significantly shifted".
+pub const SHIFT_THRESHOLD_CP: i32 = 120;
 
 /// Game phase, from [`detect_phase`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,6 +179,12 @@ pub struct OpponentContext {
     pub motifs_against_student: Vec<String>,
     /// Phase after the opponent's move.
     pub phase: Phase,
+    /// Absolute eval after the opponent's move, student's perspective
+    /// (None when the engine gave no line). Balanced's shift detection
+    /// compares this against the eval when the coach last spoke.
+    pub eval_for_student_cp: Option<i32>,
+    /// Half-moves played after the opponent's move (history length).
+    pub ply: usize,
 }
 
 /// Deterministic commentary cadence: WHEN to speak, WHAT to focus on. Pure
@@ -178,7 +193,7 @@ pub struct OpponentContext {
 pub struct CommentaryPolicy {
     style: CommentaryStyle,
     /// Consecutive ordinary good-class student moves that only got a brief
-    /// line; every 3rd earns a full "why that was good".
+    /// line; every 3rd earns a full "why that was good" (Chatty only).
     good_streak: u32,
     /// Full moves since the last development summary.
     moves_since_summary: u32,
@@ -186,6 +201,13 @@ pub struct CommentaryPolicy {
     opening_announced: bool,
     /// Last phase the policy saw; a change triggers PhaseTransition.
     phase: Phase,
+    /// Half-moves played when the coach last spoke: the start of the
+    /// window a Balanced shift recap covers.
+    last_spoken_ply: usize,
+    /// Eval (student's perspective) when the coach last spoke; Balanced
+    /// measures shift as drift from this anchor. Starts at 0 (a level
+    /// game).
+    anchor_eval_cp: i32,
 }
 
 impl CommentaryPolicy {
@@ -196,7 +218,16 @@ impl CommentaryPolicy {
             moves_since_summary: 0,
             opening_announced: false,
             phase: Phase::Opening,
+            last_spoken_ply: 0,
+            anchor_eval_cp: 0,
         }
+    }
+
+    /// The coach just spoke about the position at `ply` half-moves with the
+    /// game at `eval_cp`: later shift detection measures from here.
+    fn mark_spoken(&mut self, ply: usize, eval_cp: i32) {
+        self.last_spoken_ply = ply;
+        self.anchor_eval_cp = eval_cp;
     }
 
     pub fn style(&self) -> CommentaryStyle {
@@ -210,13 +241,15 @@ impl CommentaryPolicy {
 
     /// Decide how to react to the student's just-judged move.
     ///
-    /// `phase_now` is the phase after the move; `opening_identified` is
-    /// whether the move history still matches a named opening.
+    /// `ply_now` is the history length after the move; `phase_now` is the
+    /// phase after the move; `opening_identified` is whether the move
+    /// history still matches a named opening.
     pub fn on_student_move(
         &mut self,
         verdict: &MoveVerdict,
         milestones: &[MilestoneKind],
         move_number: u32,
+        ply_now: usize,
         phase_now: Phase,
         opening_identified: bool,
     ) -> Decision {
@@ -224,64 +257,68 @@ impl CommentaryPolicy {
         let phase_changed = phase_now != self.phase;
         self.phase = phase_now;
         let notable = verdict.judgment.is_notable();
+        let eval_now = verdict.eval_after_cp;
 
-        if self.style == CommentaryStyle::Quiet {
-            // Exactly today's behavior: LLM on notable moves, canned line
-            // otherwise; milestones, openings, and phases go unremarked.
-            return if notable {
-                Decision::Full(vec![Focus::ExplainMistake])
-            } else {
-                Decision::Brief
-            };
-        }
-
-        let mut focuses: Vec<Focus> = Vec::new();
-        if notable {
-            self.good_streak = 0;
-            focuses.push(Focus::ExplainMistake);
-            if verdict.allows_mate_in.is_some() {
-                focuses.push(Focus::ThreatWarning);
+        let decision = match self.style {
+            CommentaryStyle::Quiet => {
+                // Exactly today's behavior: LLM on notable moves, canned
+                // line otherwise; milestones, openings, and phases go
+                // unremarked.
+                if notable {
+                    Decision::Full(vec![Focus::ExplainMistake])
+                } else {
+                    Decision::Brief
+                }
             }
-        } else {
-            match self.style {
-                CommentaryStyle::Chatty => {
+            CommentaryStyle::Balanced => {
+                // Shift-triggered: nothing until the game meaningfully
+                // swings, then ONE recap of the stretch that led here. A
+                // mistake/blunder or a mate appearing IS a shift, whatever
+                // the drift; milestones, openings, and phases never
+                // interrupt on their own.
+                let shifted = matches!(verdict.judgment, Judgment::Mistake | Judgment::Blunder)
+                    || verdict.allows_mate_in.is_some()
+                    || verdict.missed_mate_in.is_some()
+                    || (eval_now - self.anchor_eval_cp).abs() >= SHIFT_THRESHOLD_CP;
+                if shifted {
+                    Decision::ShiftRecap {
+                        from_ply: self.last_spoken_ply,
+                    }
+                } else {
+                    Decision::Silent
+                }
+            }
+            CommentaryStyle::Chatty => {
+                let mut focuses: Vec<Focus> = Vec::new();
+                if notable {
+                    focuses.push(Focus::ExplainMistake);
+                    if verdict.allows_mate_in.is_some() {
+                        focuses.push(Focus::ThreatWarning);
+                    }
+                } else {
                     // Every move gets the full treatment.
-                    self.good_streak = 0;
                     focuses.push(Focus::Encourage);
                     focuses.push(Focus::ExplainWhyGood);
                 }
-                CommentaryStyle::Balanced => {
-                    self.good_streak += 1;
-                    if self.good_streak >= 3 {
-                        self.good_streak = 0;
-                        focuses.push(Focus::ExplainWhyGood);
-                    }
+                for m in milestones {
+                    focuses.push(Focus::Milestone(*m));
                 }
-                CommentaryStyle::Quiet => unreachable!("handled above"),
+                if phase_changed {
+                    focuses.push(Focus::PhaseTransition);
+                }
+                if opening_identified && !self.opening_announced {
+                    self.opening_announced = true;
+                    focuses.push(Focus::OpeningNote);
+                }
+                Decision::Full(focuses)
             }
-        }
+        };
 
-        for m in milestones {
-            focuses.push(Focus::Milestone(*m));
-        }
-        if phase_changed {
-            focuses.push(Focus::PhaseTransition);
-        }
-        if opening_identified && !self.opening_announced {
-            self.opening_announced = true;
-            focuses.push(Focus::OpeningNote);
-        }
-
-        if focuses.is_empty() {
-            Decision::Brief
-        } else {
-            // Any full reaction counts as attention paid: restart the
-            // "every 3rd good move" cadence so the coach never speaks twice
-            // in a row for streak reasons right after a milestone/phase/
-            // opening message.
+        if !matches!(decision, Decision::Silent) {
             self.good_streak = 0;
-            Decision::Full(focuses)
+            self.mark_spoken(ply_now, eval_now);
         }
+        decision
     }
 
     /// Decide how to react to the opponent's just-played move.
@@ -291,19 +328,35 @@ impl CommentaryPolicy {
         }
         let phase_changed = ctx.phase != self.phase;
         self.phase = ctx.phase;
-        self.moves_since_summary += 1;
 
-        let (swing_threshold, summary_every, flag_motifs) = match self.style {
-            CommentaryStyle::Balanced => (150, 10, false),
-            CommentaryStyle::Chatty => (90, 6, true),
-            CommentaryStyle::Quiet => unreachable!("handled above"),
-        };
+        if self.style == CommentaryStyle::Balanced {
+            // Same shift rule as student moves: a forced mate against the
+            // student, or eval drift past the threshold since the coach
+            // last spoke. No motif nagging, no scheduled summaries.
+            let drifted = ctx
+                .eval_for_student_cp
+                .map(|e| (e - self.anchor_eval_cp).abs() >= SHIFT_THRESHOLD_CP)
+                .unwrap_or(false);
+            if ctx.threatens_mate || drifted {
+                let from_ply = self.last_spoken_ply;
+                self.mark_spoken(
+                    ctx.ply,
+                    ctx.eval_for_student_cp.unwrap_or(self.anchor_eval_cp),
+                );
+                return Decision::ShiftRecap { from_ply };
+            }
+            return Decision::Silent;
+        }
+
+        // Chatty.
+        self.moves_since_summary += 1;
+        let (swing_threshold, summary_every) = (90, 6);
 
         let mut focuses: Vec<Focus> = Vec::new();
         let threatening = ctx.threatens_mate
             || ctx.wins_material
             || ctx.eval_swing_cp.abs() >= swing_threshold
-            || (flag_motifs && !ctx.motifs_against_student.is_empty());
+            || !ctx.motifs_against_student.is_empty();
         if threatening {
             focuses.push(Focus::ThreatWarning);
         }
@@ -318,6 +371,9 @@ impl CommentaryPolicy {
         if focuses.is_empty() {
             Decision::Silent
         } else {
+            if let Some(e) = ctx.eval_for_student_cp {
+                self.mark_spoken(ctx.ply, e);
+            }
             Decision::Full(focuses)
         }
     }
@@ -600,20 +656,21 @@ pub fn situation_report(
         ));
     }
 
-    // Motifs, both sides, capped so the report stays compact.
+    // Motifs, both sides, capped so the report stays compact. Tactical and
+    // positional findings get separate lines: a passed pawn is worth
+    // mentioning, but it must never displace a hanging queen. `detect`
+    // returns them priority-ordered, so each `take` keeps the sharpest.
     let found = motifs::detect(pos);
-    let against_student: Vec<&str> = found
-        .iter()
-        .filter(|m| m.against == color_name(student))
-        .map(|m| m.description.as_str())
-        .take(2)
-        .collect();
-    let for_student: Vec<&str> = found
-        .iter()
-        .filter(|m| m.against == color_name(student.other()))
-        .map(|m| m.description.as_str())
-        .take(2)
-        .collect();
+    let tactical = |against: Color| -> Vec<&str> {
+        found
+            .iter()
+            .filter(|m| m.kind.is_tactical() && m.against == color_name(against))
+            .map(|m| m.description.as_str())
+            .take(2)
+            .collect()
+    };
+    let against_student = tactical(student);
+    let for_student = tactical(student.other());
     lines.push(format!(
         "Threats: {}",
         if against_student.is_empty() {
@@ -624,6 +681,15 @@ pub fn situation_report(
     ));
     if !for_student.is_empty() {
         lines.push(format!("Tactics for the student: {}", for_student.join("; ")));
+    }
+    let positional: Vec<&str> = found
+        .iter()
+        .filter(|m| !m.kind.is_tactical())
+        .map(|m| m.description.as_str())
+        .take(2)
+        .collect();
+    if !positional.is_empty() {
+        lines.push(format!("Position notes: {}", positional.join("; ")));
     }
 
     if let Some(a) = analysis {
@@ -643,9 +709,326 @@ pub fn situation_report(
     lines.join("\n")
 }
 
+// MARK: - Pause recap
+
+/// One student move inside a recap window: what they played and what the
+/// engine thought of it while the coach was keeping quiet.
+#[derive(Debug, Clone)]
+pub struct RecapMove {
+    /// 0-based ply in the game history (matches the store's `moves.ply`).
+    pub ply: usize,
+    pub san: String,
+    pub judgment: Option<Judgment>,
+    pub cp_loss: Option<i32>,
+}
+
+/// "12. Nf3" / "12… Nc6" for a 0-based ply.
+pub fn move_label(ply: usize, san: &str) -> String {
+    let number = ply / 2 + 1;
+    if ply.is_multiple_of(2) {
+        format!("{number}. {san}")
+    } else {
+        format!("{number}… {san}")
+    }
+}
+
+/// The moves of a recap window as a readable line: "12. Nf3 Nc6, 13. Bb5".
+fn moves_line(history: &[String], from: usize) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut i = from;
+    while i < history.len() {
+        let number = i / 2 + 1;
+        if i.is_multiple_of(2) {
+            let mut chunk = format!("{number}. {}", history[i]);
+            if i + 1 < history.len() {
+                chunk.push(' ');
+                chunk.push_str(&history[i + 1]);
+                i += 1;
+            }
+            out.push(chunk);
+        } else {
+            out.push(format!("{number}… {}", history[i]));
+        }
+        i += 1;
+    }
+    out.join(", ")
+}
+
+/// The judged student moves of the window, worst first so the interesting
+/// ones survive a truncation: "13. Bb5: inaccuracy, 60 centipawns lost".
+fn judged_lines(judged: &[RecapMove], max: usize) -> Vec<String> {
+    let mut ranked: Vec<&RecapMove> = judged.iter().collect();
+    ranked.sort_by_key(|m| -m.cp_loss.unwrap_or(0));
+    ranked
+        .into_iter()
+        .filter(|m| m.judgment.is_some())
+        .take(max)
+        .map(|m| {
+            let label = m.judgment.map(|j| j.label()).unwrap_or("unjudged");
+            match m.cp_loss {
+                Some(loss) if loss > 0 => format!(
+                    "{}: {label}, {loss} centipawns lost",
+                    move_label(m.ply, &m.san)
+                ),
+                _ => format!("{}: {label}", move_label(m.ply, &m.san)),
+            }
+        })
+        .collect()
+}
+
+/// Deterministic facts block for a pause recap, handed to the LLM the same
+/// way [`situation_report`] is: every claim in it came from the engine or
+/// the board, so the model narrates rather than analyzes.
+///
+/// `from` is the history length when the coach last spoke; the window is
+/// `history[from..]`. `eval_span` is (before the window, now) in
+/// centipawns from the student's perspective.
+pub fn recap_report(
+    history: &[String],
+    from: usize,
+    judged: &[RecapMove],
+    eval_span: Option<(i32, i32)>,
+    situation: &str,
+) -> String {
+    let mut lines = vec![format!(
+        "Half-moves played while you were paused: {}",
+        history.len().saturating_sub(from)
+    )];
+    lines.push(format!("Moves: {}", moves_line(history, from)));
+    let judged_out = judged_lines(judged, 4);
+    if judged_out.is_empty() {
+        lines.push("Engine verdicts on the student's moves: none recorded".into());
+    } else {
+        lines.push(format!(
+            "Engine verdicts on the student's moves (worst first): {}",
+            judged_out.join("; ")
+        ));
+    }
+    if let Some((before, now)) = eval_span {
+        lines.push(format!(
+            "Eval across the stretch: {:+.2} to {:+.2} for the student",
+            before as f64 / 100.0,
+            now as f64 / 100.0
+        ));
+    }
+    lines.push(String::new());
+    lines.push("Situation now:".into());
+    lines.push(situation.to_string());
+    lines.join("\n")
+}
+
+/// Deterministic facts block for a Balanced shift recap: the stretch of
+/// moves since the coach last spoke, the engine's verdicts on them, and the
+/// eval swing. Handed to the LLM exactly like [`recap_report`], so the
+/// model narrates the shift rather than inventing one.
+pub fn shift_report(
+    history: &[String],
+    from: usize,
+    judged: &[RecapMove],
+    eval_span: Option<(i32, i32)>,
+    situation: &str,
+) -> String {
+    let mut lines = vec![format!(
+        "Half-moves in the stretch leading to the shift: {}",
+        history.len().saturating_sub(from)
+    )];
+    lines.push(format!("Moves: {}", moves_line(history, from)));
+    let judged_out = judged_lines(judged, 4);
+    if judged_out.is_empty() {
+        lines.push("Engine verdicts on the student's moves: none recorded".into());
+    } else {
+        lines.push(format!(
+            "Engine verdicts on the student's moves (worst first): {}",
+            judged_out.join("; ")
+        ));
+    }
+    if let Some((before, now)) = eval_span {
+        lines.push(format!(
+            "Eval across the stretch: {:+.2} to {:+.2} for the student",
+            before as f64 / 100.0,
+            now as f64 / 100.0
+        ));
+    }
+    lines.push(String::new());
+    lines.push("Situation now:".into());
+    lines.push(situation.to_string());
+    lines.join("\n")
+}
+
+/// The shift-recap line for when the LLM is unavailable: same facts, plain
+/// prose, no model involved.
+pub fn shift_fallback(
+    history: &[String],
+    from: usize,
+    judged: &[RecapMove],
+    eval_span: Option<(i32, i32)>,
+    phase: Phase,
+) -> String {
+    let notable: Vec<&RecapMove> = judged
+        .iter()
+        .filter(|m| m.judgment.is_some_and(|j| j.is_notable()))
+        .collect();
+    let worst = notable.iter().max_by_key(|m| m.cp_loss.unwrap_or(0));
+    // Which way it swung: the eval span when we have one; otherwise a
+    // student slip in the window reads as "against you"; otherwise don't
+    // claim a direction at all.
+    let direction = match eval_span.map(|(before, now)| now - before) {
+        Some(d) if d > 0 => Some(true),
+        Some(d) if d < 0 => Some(false),
+        _ => worst.map(|_| false),
+    };
+    let mut text = match direction {
+        Some(true) => "The game just swung your way.".to_string(),
+        Some(false) => "The game just shifted against you.".to_string(),
+        None => "The game just took a turn.".to_string(),
+    };
+    text.push_str(&format!(
+        " Over the last stretch ({}),",
+        moves_line(history, from)
+    ));
+    if let Some(worst) = worst {
+        text.push_str(&format!(
+            " the engine flagged {} as {}.",
+            move_label(worst.ply, &worst.san),
+            worst.judgment.map(|j| j.label()).unwrap_or("notable")
+        ));
+    } else {
+        text.push_str(" the position changed hands without a clear slip from you.");
+    }
+    if let Some((before, now)) = eval_span {
+        text.push_str(&format!(
+            " The evaluation went from {:+.2} to {:+.2}.",
+            before as f64 / 100.0,
+            now as f64 / 100.0
+        ));
+    }
+    text.push_str(&format!(
+        " We're in the {}. Take a moment here.",
+        phase.label()
+    ));
+    text
+}
+
+/// The catch-up line for when the LLM is unavailable: same facts, plain
+/// prose, no model involved.
+pub fn recap_fallback(
+    history: &[String],
+    from: usize,
+    judged: &[RecapMove],
+    eval_span: Option<(i32, i32)>,
+    phase: Phase,
+) -> String {
+    let count = history.len().saturating_sub(from);
+    let mut text = format!(
+        "Catching you up: {count} half-move{} were played while I was paused ({}).",
+        if count == 1 { "" } else { "s" },
+        moves_line(history, from)
+    );
+    let notable: Vec<&RecapMove> = judged
+        .iter()
+        .filter(|m| m.judgment.is_some_and(|j| j.is_notable()))
+        .collect();
+    if let Some(worst) = notable.iter().max_by_key(|m| m.cp_loss.unwrap_or(0)) {
+        text.push_str(&format!(
+            " The engine flagged {} as {}.",
+            move_label(worst.ply, &worst.san),
+            worst.judgment.map(|j| j.label()).unwrap_or("notable")
+        ));
+    } else if !judged.is_empty() {
+        text.push_str(" Nothing in there worried the engine.");
+    }
+    if let Some((before, now)) = eval_span {
+        let delta = now - before;
+        let drift = if delta > 50 {
+            "you gained ground over that stretch"
+        } else if delta < -50 {
+            "you gave up some ground over that stretch"
+        } else {
+            "the evaluation held roughly steady"
+        };
+        text.push_str(&format!(
+            " Overall {drift}, and you stand at {:+.2} now.",
+            now as f64 / 100.0
+        ));
+    }
+    text.push_str(&format!(" We're in the {}.", phase.label()));
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn recap_history() -> Vec<String> {
+        ["e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Bxc6", "dxc6"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn move_label_numbers_both_colors() {
+        assert_eq!(move_label(0, "e4"), "1. e4");
+        assert_eq!(move_label(1, "e5"), "1… e5");
+        assert_eq!(move_label(6, "Bxc6"), "4. Bxc6");
+    }
+
+    #[test]
+    fn recap_report_carries_the_window_not_the_whole_game() {
+        let judged = vec![RecapMove {
+            ply: 6,
+            san: "Bxc6".into(),
+            judgment: Some(Judgment::Inaccuracy),
+            cp_loss: Some(80),
+        }];
+        let report = recap_report(
+            &recap_history(),
+            4,
+            &judged,
+            Some((30, -50)),
+            "Move: 5 (opening)",
+        );
+        assert!(report.contains("Half-moves played while you were paused: 4"));
+        assert!(report.contains("3. Bb5 a6, 4. Bxc6 dxc6"));
+        // Moves from before the window must not leak in.
+        assert!(!report.contains("1. e4"));
+        assert!(report.contains("4. Bxc6: inaccuracy, 80 centipawns lost"));
+        assert!(report.contains("+0.30 to -0.50"));
+    }
+
+    #[test]
+    fn recap_fallback_leads_with_the_worst_move() {
+        let judged = vec![
+            RecapMove {
+                ply: 4,
+                san: "Bb5".into(),
+                judgment: Some(Judgment::Good),
+                cp_loss: Some(30),
+            },
+            RecapMove {
+                ply: 6,
+                san: "Bxc6".into(),
+                judgment: Some(Judgment::Blunder),
+                cp_loss: Some(400),
+            },
+        ];
+        let text = recap_fallback(&recap_history(), 4, &judged, Some((30, -50)), Phase::Opening);
+        assert!(text.contains("4 half-moves"));
+        assert!(text.contains("flagged 4. Bxc6 as blunder"));
+        assert!(text.contains("gave up some ground"));
+    }
+
+    #[test]
+    fn recap_fallback_says_so_when_nothing_slipped() {
+        let judged = vec![RecapMove {
+            ply: 4,
+            san: "Bb5".into(),
+            judgment: Some(Judgment::Best),
+            cp_loss: Some(0),
+        }];
+        let text = recap_fallback(&recap_history(), 4, &judged, None, Phase::Opening);
+        assert!(text.contains("Nothing in there worried the engine"));
+    }
 
     fn verdict(judgment: Judgment) -> MoveVerdict {
         MoveVerdict {
@@ -677,7 +1060,17 @@ mod tests {
             wins_material: false,
             motifs_against_student: vec![],
             phase: Phase::Opening,
+            eval_for_student_cp: Some(0),
+            ply: 4,
         }
+    }
+
+    /// A verdict whose post-move eval the test controls (shift detection
+    /// compares it against the policy's anchor).
+    fn verdict_at(judgment: Judgment, eval_after_cp: i32) -> MoveVerdict {
+        let mut v = verdict(judgment);
+        v.eval_after_cp = eval_after_cp;
+        v
     }
 
     // ---------- style × student-move matrix ----------
@@ -686,7 +1079,7 @@ mod tests {
     fn quiet_notable_is_full_explain_mistake() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Quiet);
         for j in [Judgment::Inaccuracy, Judgment::Mistake, Judgment::Blunder] {
-            let d = p.on_student_move(&verdict(j), &[], 5, Phase::Opening, false);
+            let d = p.on_student_move(&verdict(j), &[], 5, 9, Phase::Opening, false);
             assert_eq!(d, Decision::Full(vec![Focus::ExplainMistake]), "{j:?}");
         }
     }
@@ -698,6 +1091,7 @@ mod tests {
             &verdict(Judgment::Good),
             &[MilestoneKind::Castled],
             5,
+            9,
             Phase::Middlegame,
             true,
         );
@@ -716,93 +1110,88 @@ mod tests {
     }
 
     #[test]
-    fn balanced_notable_is_full_and_adds_threat_on_allowed_mate() {
+    fn balanced_ordinary_moves_stay_silent() {
+        // Good moves, milestones, a named opening, even a phase change:
+        // none of it interrupts while the eval holds steady.
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let d = p.on_student_move(&verdict(Judgment::Mistake), &[], 5, Phase::Opening, false);
-        assert_eq!(d, Decision::Full(vec![Focus::ExplainMistake]));
-
-        let mut v = verdict(Judgment::Blunder);
-        v.allows_mate_in = Some(2);
-        let d = p.on_student_move(&v, &[], 6, Phase::Opening, false);
+        let v = verdict(Judgment::Good); // eval_after_cp = 30, within threshold
+        assert_eq!(p.on_student_move(&v, &[], 1, 1, Phase::Opening, true), Decision::Silent);
         assert_eq!(
-            d,
-            Decision::Full(vec![Focus::ExplainMistake, Focus::ThreatWarning])
+            p.on_student_move(&v, &[MilestoneKind::Castled], 2, 3, Phase::Opening, true),
+            Decision::Silent
+        );
+        assert_eq!(
+            p.on_student_move(&v, &[], 3, 5, Phase::Middlegame, true),
+            Decision::Silent
         );
     }
 
     #[test]
-    fn balanced_every_third_good_move_gets_why_good() {
-        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let v = verdict(Judgment::Good);
-        assert_eq!(p.on_student_move(&v, &[], 1, Phase::Opening, false), Decision::Brief);
-        assert_eq!(p.on_student_move(&v, &[], 2, Phase::Opening, false), Decision::Brief);
-        assert_eq!(
-            p.on_student_move(&v, &[], 3, Phase::Opening, false),
-            Decision::Full(vec![Focus::ExplainWhyGood])
-        );
-        // Streak reset: two more briefs before the next full.
-        assert_eq!(p.on_student_move(&v, &[], 4, Phase::Opening, false), Decision::Brief);
-        assert_eq!(p.on_student_move(&v, &[], 5, Phase::Opening, false), Decision::Brief);
-        assert_eq!(
-            p.on_student_move(&v, &[], 6, Phase::Opening, false),
-            Decision::Full(vec![Focus::ExplainWhyGood])
-        );
-    }
-
-    #[test]
-    fn balanced_notable_resets_good_streak() {
+    fn balanced_mistake_or_blunder_triggers_shift_recap() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
         let good = verdict(Judgment::Good);
-        p.on_student_move(&good, &[], 1, Phase::Opening, false);
-        p.on_student_move(&good, &[], 2, Phase::Opening, false);
-        p.on_student_move(&verdict(Judgment::Mistake), &[], 3, Phase::Opening, false);
-        // Streak restarted: needs three more goods.
-        assert_eq!(p.on_student_move(&good, &[], 4, Phase::Opening, false), Decision::Brief);
-        assert_eq!(p.on_student_move(&good, &[], 5, Phase::Opening, false), Decision::Brief);
-        assert!(matches!(
-            p.on_student_move(&good, &[], 6, Phase::Opening, false),
-            Decision::Full(_)
-        ));
+        assert_eq!(p.on_student_move(&good, &[], 1, 1, Phase::Opening, false), Decision::Silent);
+        assert_eq!(p.on_student_move(&good, &[], 2, 3, Phase::Opening, false), Decision::Silent);
+        // The window opens at the last spoken ply (0, never spoke).
+        let d = p.on_student_move(&verdict(Judgment::Mistake), &[], 3, 5, Phase::Opening, false);
+        assert_eq!(d, Decision::ShiftRecap { from_ply: 0 });
+        // Having spoken at ply 5, the next shift's window starts there.
+        let d = p.on_student_move(&verdict_at(Judgment::Blunder, -400), &[], 4, 7, Phase::Opening, false);
+        assert_eq!(d, Decision::ShiftRecap { from_ply: 5 });
     }
 
     #[test]
-    fn balanced_milestone_forces_full() {
+    fn balanced_inaccuracy_alone_does_not_trigger() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let d = p.on_student_move(
-            &verdict(Judgment::Good),
-            &[MilestoneKind::Castled],
-            5,
-            Phase::Opening,
-            false,
+        // Inaccuracy with the eval still near the anchor: no interruption.
+        let d = p.on_student_move(&verdict_at(Judgment::Inaccuracy, -60), &[], 1, 1, Phase::Opening, false);
+        assert_eq!(d, Decision::Silent);
+    }
+
+    #[test]
+    fn balanced_eval_drift_triggers_shift_recap() {
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        // Slow drift: each move fine on its own, but the game has swung
+        // 130cp from the anchor by the third, and that IS the shift.
+        assert_eq!(
+            p.on_student_move(&verdict_at(Judgment::Good, -40), &[], 1, 1, Phase::Opening, false),
+            Decision::Silent
         );
-        assert_eq!(d, Decision::Full(vec![Focus::Milestone(MilestoneKind::Castled)]));
+        assert_eq!(
+            p.on_student_move(&verdict_at(Judgment::Good, -90), &[], 2, 3, Phase::Opening, false),
+            Decision::Silent
+        );
+        assert_eq!(
+            p.on_student_move(&verdict_at(Judgment::Good, -130), &[], 3, 5, Phase::Opening, false),
+            Decision::ShiftRecap { from_ply: 0 }
+        );
+        // Anchor re-based at -130: holding steady is silent again.
+        assert_eq!(
+            p.on_student_move(&verdict_at(Judgment::Good, -150), &[], 4, 7, Phase::Opening, false),
+            Decision::Silent
+        );
+        // Recovering back past the threshold is ALSO a shift (their way).
+        assert_eq!(
+            p.on_student_move(&verdict_at(Judgment::Good, 10), &[], 5, 9, Phase::Opening, false),
+            Decision::ShiftRecap { from_ply: 5 }
+        );
     }
 
     #[test]
-    fn balanced_opening_announced_exactly_once() {
+    fn balanced_mate_flags_always_trigger() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let v = verdict(Judgment::Good);
-        let d = p.on_student_move(&v, &[], 1, Phase::Opening, true);
-        assert_eq!(d, Decision::Full(vec![Focus::OpeningNote]));
-        // Still identified on later moves, never announced again — and the
-        // good-move streak restarted after that full reaction.
-        let d = p.on_student_move(&v, &[], 2, Phase::Opening, true);
-        assert_eq!(d, Decision::Brief);
-        let d = p.on_student_move(&v, &[], 3, Phase::Opening, true);
-        assert_eq!(d, Decision::Brief);
-        let d = p.on_student_move(&v, &[], 4, Phase::Opening, true);
-        assert_eq!(d, Decision::Full(vec![Focus::ExplainWhyGood]));
-    }
-
-    #[test]
-    fn balanced_phase_transition_on_student_move() {
-        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let v = verdict(Judgment::Good);
-        p.on_student_move(&v, &[], 5, Phase::Opening, false);
-        let d = p.on_student_move(&v, &[], 6, Phase::Middlegame, false);
-        assert_eq!(d, Decision::Full(vec![Focus::PhaseTransition]));
-        // No re-announcement while the phase holds.
-        assert_eq!(p.on_student_move(&v, &[], 7, Phase::Middlegame, false), Decision::Brief);
+        let mut v = verdict(Judgment::Good);
+        v.allows_mate_in = Some(3);
+        assert!(matches!(
+            p.on_student_move(&v, &[], 1, 1, Phase::Opening, false),
+            Decision::ShiftRecap { .. }
+        ));
+        let mut v = verdict(Judgment::Good);
+        v.missed_mate_in = Some(2);
+        assert!(matches!(
+            p.on_student_move(&v, &[], 2, 3, Phase::Opening, false),
+            Decision::ShiftRecap { .. }
+        ));
     }
 
     #[test]
@@ -815,7 +1204,7 @@ mod tests {
             (4, Judgment::Inaccuracy),
             (5, Judgment::Blunder),
         ] {
-            let d = p.on_student_move(&verdict(j), &[], n, Phase::Opening, false);
+            let d = p.on_student_move(&verdict(j), &[], n, n as usize * 2 - 1, Phase::Opening, false);
             assert!(matches!(d, Decision::Full(_)), "move {n} {j:?} → {d:?}");
         }
     }
@@ -823,8 +1212,31 @@ mod tests {
     #[test]
     fn chatty_good_move_focuses_encourage_then_why() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Chatty);
-        let d = p.on_student_move(&verdict(Judgment::Good), &[], 1, Phase::Opening, false);
+        let d = p.on_student_move(&verdict(Judgment::Good), &[], 1, 1, Phase::Opening, false);
         assert_eq!(d, Decision::Full(vec![Focus::Encourage, Focus::ExplainWhyGood]));
+    }
+
+    #[test]
+    fn chatty_milestone_phase_and_opening_still_ride_along() {
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Chatty);
+        let d = p.on_student_move(
+            &verdict(Judgment::Good),
+            &[MilestoneKind::Castled],
+            5,
+            9,
+            Phase::Middlegame,
+            true,
+        );
+        assert_eq!(
+            d,
+            Decision::Full(vec![
+                Focus::Encourage,
+                Focus::ExplainWhyGood,
+                Focus::Milestone(MilestoneKind::Castled),
+                Focus::PhaseTransition,
+                Focus::OpeningNote,
+            ])
+        );
     }
 
     // ---------- style × opponent-move matrix ----------
@@ -836,59 +1248,34 @@ mod tests {
     }
 
     #[test]
-    fn balanced_opponent_threat_or_big_swing_warns() {
+    fn balanced_opponent_shift_triggers_recap() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        // Drift past the threshold since the coach last spoke.
         let mut c = ctx();
+        c.eval_for_student_cp = Some(-150);
+        assert_eq!(p.on_opponent_move(&c), Decision::ShiftRecap { from_ply: 0 });
+        // Anchor re-based: the same eval again is silent.
+        c.ply = 6;
+        assert_eq!(p.on_opponent_move(&c), Decision::Silent);
+
+        // A forced mate against the student always triggers.
+        let mut c = ctx();
+        c.ply = 8;
+        c.eval_for_student_cp = Some(-150);
         c.threatens_mate = true;
-        assert_eq!(p.on_opponent_move(&c), Decision::Full(vec![Focus::ThreatWarning]));
+        assert_eq!(p.on_opponent_move(&c), Decision::ShiftRecap { from_ply: 4 });
+    }
 
-        let mut c = ctx();
-        c.wins_material = true;
-        assert_eq!(p.on_opponent_move(&c), Decision::Full(vec![Focus::ThreatWarning]));
-
-        let mut c = ctx();
-        c.eval_swing_cp = -200;
-        assert_eq!(p.on_opponent_move(&c), Decision::Full(vec![Focus::ThreatWarning]));
-
-        // Balanced ignores bare motifs (static detectors over-report).
+    #[test]
+    fn balanced_opponent_ignores_motifs_summaries_and_phases() {
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
         let mut c = ctx();
         c.motifs_against_student = vec!["the white knight on f3 is attacked".into()];
-        assert_eq!(p.on_opponent_move(&c), Decision::Silent);
-
-        // A sub-threshold swing stays silent.
-        let mut c = ctx();
-        c.eval_swing_cp = -100;
-        assert_eq!(p.on_opponent_move(&c), Decision::Silent);
-    }
-
-    #[test]
-    fn balanced_summary_every_ten_full_moves() {
-        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let c = ctx();
-        for i in 1..10 {
+        c.phase = Phase::Middlegame;
+        for i in 0..12 {
+            c.ply = 2 * i + 2;
             assert_eq!(p.on_opponent_move(&c), Decision::Silent, "move {i}");
         }
-        assert_eq!(
-            p.on_opponent_move(&c),
-            Decision::Full(vec![Focus::DevelopmentSummary])
-        );
-        // Counter resets.
-        for i in 1..10 {
-            assert_eq!(p.on_opponent_move(&c), Decision::Silent, "second lap {i}");
-        }
-        assert_eq!(
-            p.on_opponent_move(&c),
-            Decision::Full(vec![Focus::DevelopmentSummary])
-        );
-    }
-
-    #[test]
-    fn balanced_phase_transition_on_opponent_move() {
-        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let mut c = ctx();
-        c.phase = Phase::Middlegame;
-        assert_eq!(p.on_opponent_move(&c), Decision::Full(vec![Focus::PhaseTransition]));
-        assert_eq!(p.on_opponent_move(&c), Decision::Silent);
     }
 
     #[test]
@@ -917,10 +1304,10 @@ mod tests {
     }
 
     #[test]
-    fn combined_focuses_accumulate() {
-        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+    fn chatty_combined_focuses_accumulate() {
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Chatty);
         let quiet = ctx();
-        for _ in 0..9 {
+        for _ in 0..5 {
             p.on_opponent_move(&quiet);
         }
         let mut c = ctx();
