@@ -6,6 +6,11 @@ import SwiftUI
 struct ArrowOverlay: View {
     let arrows: [BoardArrow]
     var flipped = false
+    /// Fixed draw-in progress instead of the on-appear spring. Offscreen
+    /// rendering (the video exporter) sets this: `.onAppear` animation
+    /// never fires under `ImageRenderer`, so each frame states its own
+    /// progress explicitly.
+    var fixedProgress: CGFloat?
 
     var body: some View {
         GeometryReader { geo in
@@ -13,7 +18,12 @@ struct ArrowOverlay: View {
             ForEach(arrows) { arrow in
                 if let from = Self.center(of: arrow.from, square: square, flipped: flipped),
                    let to = Self.center(of: arrow.to, square: square, flipped: flipped) {
-                    AnimatedArrow(from: from, to: to, squareSize: square)
+                    if let fixedProgress {
+                        StaticArrow(progress: fixedProgress, from: from, to: to,
+                                    squareSize: square)
+                    } else {
+                        AnimatedArrow(from: from, to: to, squareSize: square)
+                    }
                 }
             }
         }
@@ -33,6 +43,25 @@ struct ArrowOverlay: View {
         return CGPoint(
             x: (CGFloat(col) + 0.5) * square,
             y: (CGFloat(row) + 0.5) * square)
+    }
+}
+
+/// One arrow at a stated progress: same fill/stroke/shadow styling as
+/// `AnimatedArrow`, no time-based state.
+private struct StaticArrow: View {
+    let progress: CGFloat
+    let from: CGPoint
+    let to: CGPoint
+    let squareSize: CGFloat
+
+    var body: some View {
+        ArrowShape(progress: progress, from: from, to: to, squareSize: squareSize)
+            .fill(Brand.annotation.opacity(0.88))
+            .overlay(
+                ArrowShape(progress: progress, from: from, to: to, squareSize: squareSize)
+                    .stroke(Color.white.opacity(0.9), lineWidth: 1.5)
+            )
+            .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
     }
 }
 

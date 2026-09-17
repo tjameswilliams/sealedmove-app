@@ -687,6 +687,9 @@ struct ReplayBoardView: View {
     /// Animated move arrows (the lexicon sheet's demo board draws the
     /// line being played).
     var arrows: [BoardArrow] = []
+    /// Fixed arrow draw-in progress for offscreen rendering; nil keeps the
+    /// normal on-appear animation.
+    var arrowProgress: CGFloat?
 
     private static let files = ["a", "b", "c", "d", "e", "f", "g", "h"]
 
@@ -706,7 +709,7 @@ struct ReplayBoardView: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(Color.black.opacity(0.25), lineWidth: 1)
         )
-        .overlay(ArrowOverlay(arrows: arrows))
+        .overlay(ArrowOverlay(arrows: arrows, fixedProgress: arrowProgress))
     }
 
     @ViewBuilder
@@ -725,12 +728,12 @@ struct ReplayBoardView: View {
             }
             if let piece {
                 GeometryReader { geo in
-                    Text(piece.glyph)
-                        .font(.system(size: geo.size.width * 0.72))
-                        .foregroundStyle(piece.isWhite ? Color.white : Color.black)
-                        .shadow(color: piece.isWhite ? .black.opacity(0.55) : .clear, radius: 1)
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .minimumScaleFactor(0.5)
+                    OutlinedPieceGlyph(
+                        glyph: piece.glyph,
+                        size: geo.size.width * 0.85,
+                        isWhite: piece.isWhite
+                    )
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
             }
             if verdictSquare == name, let judgment = verdictJudgment {

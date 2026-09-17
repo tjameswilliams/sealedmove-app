@@ -879,6 +879,15 @@ public func FfiConverterTypeBoardHandle_lower(_ value: BoardHandle) -> UnsafeMut
 public protocol CoachSessionHandleProtocol: AnyObject, Sendable {
     
     /**
+     * Full-strength engine analysis of an arbitrary FEN, independent of
+     * the game on the board. Returns the `Analysis` as JSON: `best_move`
+     * (UCI) plus MultiPV `lines`, each with `depth`, `score`
+     * (`{kind: "cp"|"mate", value}`) and the `pv` in UCI. SLOW at high
+     * depth — call off the main thread.
+     */
+    func analyzeFen(fen: String, depth: UInt32, multipv: UInt32) throws  -> String
+    
+    /**
      * Attach the opponent engine (Maia via lc0 needs
      * `--weights=<file>` in `args`; `nodes = 1` for authentic Maia play).
      */
@@ -1288,6 +1297,23 @@ public static func newWithOpenaiEmbedded(baseUrl: String, apiKey: String?, model
 }
     
 
+    
+    /**
+     * Full-strength engine analysis of an arbitrary FEN, independent of
+     * the game on the board. Returns the `Analysis` as JSON: `best_move`
+     * (UCI) plus MultiPV `lines`, each with `depth`, `score`
+     * (`{kind: "cp"|"mate", value}`) and the `pv` in UCI. SLOW at high
+     * depth — call off the main thread.
+     */
+open func analyzeFen(fen: String, depth: UInt32, multipv: UInt32)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_coach_ffi_fn_method_coachsessionhandle_analyze_fen(self.uniffiClonePointer(),
+        FfiConverterString.lower(fen),
+        FfiConverterUInt32.lower(depth),
+        FfiConverterUInt32.lower(multipv),$0
+    )
+})
+}
     
     /**
      * Attach the opponent engine (Maia via lc0 needs
@@ -2072,9 +2098,10 @@ public enum FfiCommentaryStyle {
      */
     case quiet
     /**
-     * Shift-triggered: silent until the game significantly shifts (eval
-     * drift, mistake/blunder, forced mate), then one recap of the stretch
-     * of moves that led to the swing.
+     * Shift-triggered: silent until the game significantly shifts (a
+     * 20-point swing in win probability from one move or accumulated
+     * since the coach last spoke, or a forced mate against the student),
+     * then one recap of the stretch of moves that led to the swing.
      */
     case balanced
     /**
@@ -2532,6 +2559,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_coach_ffi_checksum_method_boardhandle_turn_white() != 56745) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_coach_ffi_checksum_method_coachsessionhandle_analyze_fen() != 59937) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_coach_ffi_checksum_method_coachsessionhandle_attach_opponent() != 47845) {

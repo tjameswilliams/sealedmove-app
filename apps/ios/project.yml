@@ -47,14 +47,17 @@ targets:
         # HTTPS-only networking -> exempt encryption; declaring it here
         # skips the export-compliance question on every upload.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        # The share sheet's "Save Video" activity (exported game videos)
+        # needs the add-only photo permission string.
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Sealed Move saves exported game videos to your photo library only when you choose Save Video."
         # App Store validation requires explicit orientations (error 90474).
         # The docked board/coach layout is portrait-by-design; on iPad it
         # runs full-screen portrait rather than untested multitasking sizes.
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
         INFOPLIST_KEY_UIRequiresFullScreen: YES
-        CURRENT_PROJECT_VERSION: 3
-        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: 4
+        MARKETING_VERSION: "0.3.0"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         # Automatic signing for device runs; the DEVELOPMENT_TEAM comes from

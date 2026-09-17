@@ -40,6 +40,8 @@ struct GameReviewSheet: View {
     @State private var isPlaying = false
     /// The auto-walk task, so pause/scrub can cancel it.
     @State private var playTask: Task<Void, Never>?
+    /// The video-export sheet is up.
+    @State private var showExport = false
 
     /// How many moves of run-up a moment replays before landing on itself.
     private static let runUpMoves = 2
@@ -74,6 +76,22 @@ struct GameReviewSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if review != nil, fens.count > 1 {
+                        Button {
+                            stopPlayback()
+                            showExport = true
+                        } label: {
+                            Image(systemName: "film")
+                        }
+                        .accessibilityLabel("Export a video of this game")
+                    }
+                }
+            }
+            .sheet(isPresented: $showExport) {
+                if let review {
+                    ExportVideoSheet(game: ExportableGame(review: review, fens: fens))
                 }
             }
             .onAppear(perform: start)
