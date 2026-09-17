@@ -39,9 +39,10 @@ pub enum FfiCommentaryStyle {
     /// LLM only on notable moves (inaccuracy/mistake/blunder), canned lines
     /// otherwise, no opponent or game-arc commentary.
     Quiet,
-    /// Shift-triggered: silent until the game significantly shifts (eval
-    /// drift, mistake/blunder, forced mate), then one recap of the stretch
-    /// of moves that led to the swing.
+    /// Shift-triggered: silent until the game significantly shifts (a
+    /// 20-point swing in win probability from one move or accumulated
+    /// since the coach last spoke, or a forced mate against the student),
+    /// then one recap of the stretch of moves that led to the swing.
     Balanced,
     /// Full reaction to every student move; opponent commentary whenever
     /// anything is worth flagging; frequent development summaries.
@@ -308,6 +309,17 @@ impl CoachSessionHandle {
         let mut session = self.lock();
         let verdict = RUNTIME.block_on(session.judge_student_move(&san))?;
         Ok(serde_json::to_string(&verdict)?)
+    }
+
+    /// Full-strength engine analysis of an arbitrary FEN, independent of
+    /// the game on the board. Returns the `Analysis` as JSON: `best_move`
+    /// (UCI) plus MultiPV `lines`, each with `depth`, `score`
+    /// (`{kind: "cp"|"mate", value}`) and the `pv` in UCI. SLOW at high
+    /// depth — call off the main thread.
+    pub fn analyze_fen(&self, fen: String, depth: u32, multipv: u32) -> Result<String, FfiError> {
+        let mut session = self.lock();
+        let analysis = RUNTIME.block_on(session.analyze_fen(&fen, depth, multipv))?;
+        Ok(serde_json::to_string(&analysis)?)
     }
 
     /// Ask the model to react to the most recent judged move (LLM + tools).

@@ -97,8 +97,9 @@ enum Cmd {
         #[arg(long)]
         voice: bool,
         /// How much the coach talks: quiet (notable moves only), balanced
-        /// (milestones, occasional "why that was good", threat warnings,
-        /// periodic summaries), or chatty (every move + more).
+        /// (silent until the game swings 20 points of win probability or
+        /// a forced mate appears, then one recap), or chatty (every move
+        /// + more).
         #[arg(long, value_enum, default_value_t = StyleArg::Balanced)]
         style: StyleArg,
         /// Deprecated alias for `--style chatty`.

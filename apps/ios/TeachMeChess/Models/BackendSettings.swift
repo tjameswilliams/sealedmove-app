@@ -47,7 +47,7 @@ enum CoachChattiness: String, CaseIterable, Identifiable {
         case .quiet:
             return "The coach only speaks up about inaccuracies, mistakes, and blunders."
         case .balanced:
-            return "The coach stays quiet until the game significantly shifts, then recaps the moves that led to the swing."
+            return "The coach stays quiet until the game really swings, a bad move by you or a real change in who is winning, then recaps the moves that led there."
         case .chatty:
             return "A full reaction to every move, plus threat warnings, phase notes, and game summaries."
         }

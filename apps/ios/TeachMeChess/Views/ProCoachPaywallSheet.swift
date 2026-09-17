@@ -94,15 +94,13 @@ struct ProCoachPurchaseControls: View {
         }
     }
 
-    /// Mirror the settings sheet's Apply: when Pro Coach is the chosen
-    /// provider, swap the live session onto the refreshed (pro)
-    /// registration so the very next coach reply uses it.
+    /// Subscribing IS choosing Pro Coach: a lapsed trial parks the saved
+    /// provider on on-device, so the purchase has to select Pro Coach
+    /// again as well as swap the live session onto the refreshed (pro)
+    /// registration.
     @MainActor private func finishIfSubscribed() {
         guard store.phase == .subscribed || store.phase == .pendingServerSync else { return }
-        let settings = BackendSettings.load()
-        if settings.provider == .proCoach {
-            model.applyBackend(settings)
-        }
+        model.activateProCoachSubscription()
         onSubscribed?()
     }
 }

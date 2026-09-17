@@ -535,6 +535,20 @@ impl CoachSession {
         Ok(analysis)
     }
 
+    /// Full-strength analysis of an arbitrary position, independent of the
+    /// live game (the board and the one-entry cache are untouched). The FEN
+    /// is validated before it reaches the engine — Stockfish never sees a
+    /// malformed position string.
+    pub async fn analyze_fen(
+        &mut self,
+        fen: &str,
+        depth: u32,
+        multipv: u32,
+    ) -> Result<Analysis, CoachError> {
+        GameState::from_fen(fen)?;
+        Ok(self.analyst.analyze(fen, depth, multipv).await?)
+    }
+
     /// Engine-only judgment of a student move: plays it on the board and
     /// returns the verdict. No LLM involved — this is the cheap step that
     /// runs on *every* move; commentary cadence decides separately whether
@@ -565,8 +579,17 @@ impl CoachSession {
             .first()
             .map(|l| l.score.as_cp())
             .unwrap_or(0);
-        // `after` is from the opponent's perspective — negate.
-        let eval_after = -after.lines.first().map(|l| l.score.as_cp()).unwrap_or(0);
+        // `after` is from the opponent's perspective — negate. A terminal
+        // position has no line to report: score a delivered checkmate as
+        // the mate it is (matching `Score::Mate`'s clamp), and any other
+        // ending (stalemate, insufficient material) as level — otherwise a
+        // mating move gets judged as a 9999cp blunder against the mate-in-N
+        // eval it had before the move.
+        let eval_after = match after.lines.first() {
+            Some(l) => -l.score.as_cp(),
+            None if self.game.position().is_checkmate() => 10_000,
+            None => 0,
+        };
         let (cp_loss, judgment) = judge_move(eval_before, eval_after);
 
         let after_score = after.lines.first().map(|l| l.score);

@@ -23,11 +23,14 @@ pub enum CommentaryStyle {
     /// opponent or game-arc commentary at all.
     Quiet,
     /// Shift-triggered: the coach stays silent until the engine decides the
-    /// game has significantly shifted (the eval has drifted
-    /// [`SHIFT_THRESHOLD_CP`] since the coach last spoke, a mistake/blunder
-    /// landed, or a forced mate appeared). It then recaps the stretch of
-    /// moves that led to the swing in one message instead of interrupting
-    /// on every move.
+    /// game has significantly shifted, measured as a swing in win
+    /// probability of [`SHIFT_THRESHOLD_WIN_PCT`] points, either from one
+    /// move or accumulated since the coach last spoke, or a forced mate
+    /// against the student appearing. It then recaps the stretch of moves
+    /// that led to the swing in one message instead of interrupting on
+    /// every move. Centipawn labels alone (a "mistake" by cp loss) do not
+    /// count: losing a pawn when already up a rook changes nothing about
+    /// who is winning, and neither does drifting from +3 to +4.5.
     #[default]
     Balanced,
     /// Full LLM reaction to every student move; opponent commentary whenever
@@ -78,9 +81,27 @@ pub enum Decision {
     ShiftRecap { from_ply: usize },
 }
 
-/// Eval drift (centipawns, student's perspective) since the coach last
-/// spoke that Balanced counts as "the game has significantly shifted".
-pub const SHIFT_THRESHOLD_CP: i32 = 120;
+/// Swing in win probability (percentage points, student's perspective)
+/// that Balanced counts as "the game has significantly shifted": either
+/// one move's before-vs-after, or the drift since the coach last spoke.
+/// Measured in win probability rather than raw centipawns so that +3
+/// drifting to +4.5 is not a shift while a level game sliding to -2.3 is.
+/// 20 points is the drop Lichess labels a mistake (a blunder is 30). From
+/// a level game that is roughly 230 centipawns, about a clean piece.
+pub const SHIFT_THRESHOLD_WIN_PCT: f64 = 20.0;
+
+/// Evals at or beyond this magnitude are mate scores (`Score::as_cp`
+/// clamps mates to ±10_000 minus the distance).
+const MATE_CP_FLOOR: i32 = 9_000;
+
+/// Expected score for the side the eval favors, as a percentage 0..=100,
+/// from a centipawn eval. Lichess's fit of engine eval to game outcomes:
+/// `50 + 50 * (2 / (1 + e^(-0.00368208 * cp)) - 1)`. A level game is 50,
+/// +100 is about 59, +300 about 75, -230 about 30, and a mate score is
+/// effectively 100 (or 0).
+pub fn win_pct(cp: i32) -> f64 {
+    50.0 + 50.0 * (2.0 / (1.0 + (-0.00368208 * cp as f64).exp()) - 1.0)
+}
 
 /// Game phase, from [`detect_phase`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +229,9 @@ pub struct CommentaryPolicy {
     /// measures shift as drift from this anchor. Starts at 0 (a level
     /// game).
     anchor_eval_cp: i32,
+    /// Whether the coach has spoken at all this game (the anchor fields
+    /// above start at "ply 0, level" either way).
+    has_spoken: bool,
 }
 
 impl CommentaryPolicy {
@@ -220,6 +244,7 @@ impl CommentaryPolicy {
             phase: Phase::Opening,
             last_spoken_ply: 0,
             anchor_eval_cp: 0,
+            has_spoken: false,
         }
     }
 
@@ -228,6 +253,19 @@ impl CommentaryPolicy {
     fn mark_spoken(&mut self, ply: usize, eval_cp: i32) {
         self.last_spoken_ply = ply;
         self.anchor_eval_cp = eval_cp;
+        self.has_spoken = true;
+    }
+
+    /// The coach's last word was about a position already lost by force:
+    /// a mating net is one lesson, not one per move.
+    fn anchor_is_mate_against(&self) -> bool {
+        self.anchor_eval_cp <= -MATE_CP_FLOOR
+    }
+
+    /// Balanced's shift test: has the student's win probability moved
+    /// [`SHIFT_THRESHOLD_WIN_PCT`] points between `from_cp` and `to_cp`?
+    fn swung(from_cp: i32, to_cp: i32) -> bool {
+        (win_pct(to_cp) - win_pct(from_cp)).abs() >= SHIFT_THRESHOLD_WIN_PCT
     }
 
     pub fn style(&self) -> CommentaryStyle {
@@ -273,13 +311,22 @@ impl CommentaryPolicy {
             CommentaryStyle::Balanced => {
                 // Shift-triggered: nothing until the game meaningfully
                 // swings, then ONE recap of the stretch that led here. A
-                // mistake/blunder or a mate appearing IS a shift, whatever
-                // the drift; milestones, openings, and phases never
-                // interrupt on their own.
-                let shifted = matches!(verdict.judgment, Judgment::Mistake | Judgment::Blunder)
-                    || verdict.allows_mate_in.is_some()
-                    || verdict.missed_mate_in.is_some()
-                    || (eval_now - self.anchor_eval_cp).abs() >= SHIFT_THRESHOLD_CP;
+                // swing is a win-probability move past the threshold,
+                // either by this move alone (a bad move from a level
+                // game) or accumulated since the coach last spoke (a slow
+                // slide). The cp-loss judgment is deliberately ignored:
+                // a "mistake" that leaves the student just as winning, or
+                // just as lost, is not news. A missed forced mate
+                // registers through the same test, exactly when it costs
+                // enough that the student is no longer clearly winning.
+                // Allowing a forced mate counts even from a bad position,
+                // but once: after the coach has called a position lost by
+                // force, the rest of the mating net stays quiet.
+                // Milestones, openings, and phases never interrupt on
+                // their own.
+                let shifted = Self::swung(verdict.eval_before_cp, eval_now)
+                    || Self::swung(self.anchor_eval_cp, eval_now)
+                    || (verdict.allows_mate_in.is_some() && !self.anchor_is_mate_against());
                 if shifted {
                     Decision::ShiftRecap {
                         from_ply: self.last_spoken_ply,
@@ -330,14 +377,23 @@ impl CommentaryPolicy {
         self.phase = ctx.phase;
 
         if self.style == CommentaryStyle::Balanced {
-            // Same shift rule as student moves: a forced mate against the
-            // student, or eval drift past the threshold since the coach
-            // last spoke. No motif nagging, no scheduled summaries.
-            let drifted = ctx
-                .eval_for_student_cp
-                .map(|e| (e - self.anchor_eval_cp).abs() >= SHIFT_THRESHOLD_CP)
-                .unwrap_or(false);
-            if ctx.threatens_mate || drifted {
+            // Same shift rule as student moves: win-probability drift past
+            // the threshold since the coach last spoke, or a forced mate
+            // against the student appearing (once per mating net, as
+            // above). The reply immediately after a recap is exempt from
+            // the drift test: the recap just described this position's
+            // prospects, and the eval settling after the opponent's
+            // answer is not news; if it holds, the student's next move
+            // triggers the recap a ply later. A mate threat is still
+            // news. No motif nagging, no scheduled summaries.
+            let mate_now = ctx.threatens_mate && !self.anchor_is_mate_against();
+            let just_spoke = self.has_spoken && ctx.ply <= self.last_spoken_ply + 1;
+            let drifted = !just_spoke
+                && ctx
+                    .eval_for_student_cp
+                    .map(|e| Self::swung(self.anchor_eval_cp, e))
+                    .unwrap_or(false);
+            if mate_now || drifted {
                 let from_ply = self.last_spoken_ply;
                 self.mark_spoken(
                     ctx.ply,
@@ -1073,6 +1129,30 @@ mod tests {
         v
     }
 
+    /// A verdict whose before/after evals the test controls, judged the
+    /// way the session would, so the fixture stays honest about what the
+    /// cp-loss label says versus what the win probability says.
+    fn swing(before_cp: i32, after_cp: i32) -> MoveVerdict {
+        let (cp_loss, judgment) = crate::engine::judge_move(before_cp, after_cp);
+        let mut v = verdict(judgment);
+        v.cp_loss = cp_loss;
+        v.eval_before_cp = before_cp;
+        v.eval_after_cp = after_cp;
+        v
+    }
+
+    #[test]
+    fn win_pct_is_lichess_curve() {
+        assert!((win_pct(0) - 50.0).abs() < 1e-9);
+        assert!((win_pct(100) - 59.1).abs() < 0.1);
+        assert!((win_pct(300) - 75.1).abs() < 0.1);
+        assert!((win_pct(-230) - 30.0).abs() < 0.2);
+        assert!(win_pct(9_997) > 99.9);
+        assert!(win_pct(-9_997) < 0.1);
+        // Symmetric around a level game.
+        assert!((win_pct(150) + win_pct(-150) - 100.0).abs() < 1e-9);
+    }
+
     // ---------- style × student-move matrix ----------
 
     #[test]
@@ -1127,17 +1207,43 @@ mod tests {
     }
 
     #[test]
-    fn balanced_mistake_or_blunder_triggers_shift_recap() {
+    fn balanced_move_that_swings_the_game_triggers_shift_recap() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
         let good = verdict(Judgment::Good);
         assert_eq!(p.on_student_move(&good, &[], 1, 1, Phase::Opening, false), Decision::Silent);
         assert_eq!(p.on_student_move(&good, &[], 2, 3, Phase::Opening, false), Decision::Silent);
-        // The window opens at the last spoken ply (0, never spoke).
-        let d = p.on_student_move(&verdict(Judgment::Mistake), &[], 3, 5, Phase::Opening, false);
+        // Level to a clean piece down (about 53% to 30%): a swing. The
+        // window opens at the last spoken ply (0, never spoke).
+        let d = p.on_student_move(&swing(30, -230), &[], 3, 5, Phase::Opening, false);
         assert_eq!(d, Decision::ShiftRecap { from_ply: 0 });
-        // Having spoken at ply 5, the next shift's window starts there.
-        let d = p.on_student_move(&verdict_at(Judgment::Blunder, -400), &[], 4, 7, Phase::Opening, false);
+        // Having spoken at ply 5, the next shift's window starts there:
+        // a piece down to hopeless (30% to under 10%) is another swing.
+        let d = p.on_student_move(&swing(-230, -700), &[], 4, 7, Phase::Opening, false);
         assert_eq!(d, Decision::ShiftRecap { from_ply: 5 });
+    }
+
+    #[test]
+    fn balanced_cp_mistake_that_changes_nothing_is_silent() {
+        // Both of these are a "mistake" by centipawn loss, and neither
+        // changes who is winning: the coach holds its tongue.
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        // Speak once so the anchor sits at +400 (about 81%).
+        assert!(matches!(
+            p.on_student_move(&swing(30, 400), &[], 1, 1, Phase::Opening, false),
+            Decision::ShiftRecap { .. }
+        ));
+        let v = swing(400, 250); // still 71%, comfortably winning
+        assert_eq!(v.judgment, Judgment::Mistake);
+        assert_eq!(p.on_student_move(&v, &[], 2, 3, Phase::Opening, false), Decision::Silent);
+
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        assert!(matches!(
+            p.on_student_move(&swing(30, -500), &[], 1, 1, Phase::Opening, false),
+            Decision::ShiftRecap { .. }
+        ));
+        let v = swing(-500, -700); // 14% to 7%: already lost, still lost
+        assert_eq!(v.judgment, Judgment::Mistake);
+        assert_eq!(p.on_student_move(&v, &[], 2, 3, Phase::Opening, false), Decision::Silent);
     }
 
     #[test]
@@ -1151,47 +1257,107 @@ mod tests {
     #[test]
     fn balanced_eval_drift_triggers_shift_recap() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        // Slow drift: each move fine on its own, but the game has swung
-        // 130cp from the anchor by the third, and that IS the shift.
+        // Slow drift: each move fine on its own, and the old 120cp rule
+        // would already have fired at -130. In win probability the game
+        // is only 20 points worse once it reaches about -250, and THAT is
+        // the shift.
+        let mut prev = 0;
+        for (n, cp) in [(1, -40), (2, -90), (3, -130), (4, -200)] {
+            assert_eq!(
+                p.on_student_move(&swing(prev, cp), &[], n, 2 * n as usize - 1, Phase::Opening, false),
+                Decision::Silent,
+                "at {cp}"
+            );
+            prev = cp;
+        }
         assert_eq!(
-            p.on_student_move(&verdict_at(Judgment::Good, -40), &[], 1, 1, Phase::Opening, false),
-            Decision::Silent
-        );
-        assert_eq!(
-            p.on_student_move(&verdict_at(Judgment::Good, -90), &[], 2, 3, Phase::Opening, false),
-            Decision::Silent
-        );
-        assert_eq!(
-            p.on_student_move(&verdict_at(Judgment::Good, -130), &[], 3, 5, Phase::Opening, false),
+            p.on_student_move(&swing(-200, -260), &[], 5, 9, Phase::Opening, false),
             Decision::ShiftRecap { from_ply: 0 }
         );
-        // Anchor re-based at -130: holding steady is silent again.
+        // Anchor re-based at -260: holding steady is silent again.
         assert_eq!(
-            p.on_student_move(&verdict_at(Judgment::Good, -150), &[], 4, 7, Phase::Opening, false),
+            p.on_student_move(&swing(-260, -300), &[], 6, 11, Phase::Opening, false),
             Decision::Silent
         );
         // Recovering back past the threshold is ALSO a shift (their way).
         assert_eq!(
-            p.on_student_move(&verdict_at(Judgment::Good, 10), &[], 5, 9, Phase::Opening, false),
-            Decision::ShiftRecap { from_ply: 5 }
+            p.on_student_move(&swing(-300, 50), &[], 7, 13, Phase::Opening, false),
+            Decision::ShiftRecap { from_ply: 9 }
         );
     }
 
     #[test]
-    fn balanced_mate_flags_always_trigger() {
+    fn balanced_slow_slide_to_a_lost_game_speaks_twice() {
+        // A weaker player losing 50cp a move from level to -900: the old
+        // rule spoke every 120cp (seven times). Win probability flattens
+        // out as the game is decided, so the coach speaks twice: once
+        // when the game turns (about -250) and once when it is gone
+        // (about -650).
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        let mut v = verdict(Judgment::Good);
+        let mut recaps = Vec::new();
+        let mut prev = 0;
+        for i in 1..=18 {
+            let cp = -50 * i;
+            let ply = 2 * i as usize - 1;
+            if let Decision::ShiftRecap { .. } =
+                p.on_student_move(&swing(prev, cp), &[], i as u32, ply, Phase::Middlegame, false)
+            {
+                recaps.push(cp);
+            }
+            prev = cp;
+        }
+        assert_eq!(recaps, vec![-250, -650]);
+    }
+
+    #[test]
+    fn balanced_allowing_mate_triggers_once_per_mating_net() {
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        // Already losing (about 19%), the coach has said so.
+        assert!(matches!(
+            p.on_student_move(&swing(30, -400), &[], 1, 1, Phase::Opening, false),
+            Decision::ShiftRecap { .. }
+        ));
+        // 19% to 0% is under the swing threshold, but a forced mate
+        // appearing is news in its own right.
+        let mut v = swing(-400, -9_997);
         v.allows_mate_in = Some(3);
-        assert!(matches!(
-            p.on_student_move(&v, &[], 1, 1, Phase::Opening, false),
-            Decision::ShiftRecap { .. }
-        ));
-        let mut v = verdict(Judgment::Good);
-        v.missed_mate_in = Some(2);
-        assert!(matches!(
+        assert_eq!(
             p.on_student_move(&v, &[], 2, 3, Phase::Opening, false),
+            Decision::ShiftRecap { from_ply: 1 }
+        );
+        // Every move inside the mating net "allows mate" again. The
+        // lesson was given; the rest is silence.
+        for n in 3..8 {
+            let mut v = swing(-9_996, -9_995);
+            v.allows_mate_in = Some(2);
+            assert_eq!(
+                p.on_student_move(&v, &[], n, 2 * n as usize - 1, Phase::Endgame, false),
+                Decision::Silent,
+                "move {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn balanced_missed_mate_counts_only_when_it_costs_the_win() {
+        // Missing a mate but staying crushing (+900, about 96%): not a
+        // swing, the engine will find the next one.
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        assert!(matches!(
+            p.on_student_move(&swing(30, 900), &[], 1, 1, Phase::Middlegame, false),
             Decision::ShiftRecap { .. }
         ));
+        let mut v = swing(9_997, 900);
+        v.missed_mate_in = Some(3);
+        assert_eq!(p.on_student_move(&v, &[], 2, 3, Phase::Middlegame, false), Decision::Silent);
+        // Missing a mate and dropping to merely better (+200, 68%): the
+        // move itself swung the game by 30 points.
+        let mut v = swing(9_997, 200);
+        v.missed_mate_in = Some(3);
+        assert_eq!(
+            p.on_student_move(&v, &[], 3, 5, Phase::Middlegame, false),
+            Decision::ShiftRecap { from_ply: 1 }
+        );
     }
 
     #[test]
@@ -1250,20 +1416,66 @@ mod tests {
     #[test]
     fn balanced_opponent_shift_triggers_recap() {
         let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
-        // Drift past the threshold since the coach last spoke.
+        // -150 (37%) is a pawn and a half: not a swing.
         let mut c = ctx();
         c.eval_for_student_cp = Some(-150);
+        assert_eq!(p.on_opponent_move(&c), Decision::Silent);
+        // -300 (25%) is: drift past the threshold since the coach last
+        // spoke.
+        c.eval_for_student_cp = Some(-300);
         assert_eq!(p.on_opponent_move(&c), Decision::ShiftRecap { from_ply: 0 });
         // Anchor re-based: the same eval again is silent.
         c.ply = 6;
         assert_eq!(p.on_opponent_move(&c), Decision::Silent);
 
-        // A forced mate against the student always triggers.
+        // A forced mate against the student triggers from a position the
+        // coach had not yet called lost by force...
         let mut c = ctx();
         c.ply = 8;
-        c.eval_for_student_cp = Some(-150);
+        c.eval_for_student_cp = Some(-9_995);
         c.threatens_mate = true;
         assert_eq!(p.on_opponent_move(&c), Decision::ShiftRecap { from_ply: 4 });
+        // ...and then not again for the rest of the mating net.
+        for ply in [10, 12, 14] {
+            c.ply = ply;
+            assert_eq!(p.on_opponent_move(&c), Decision::Silent, "ply {ply}");
+        }
+    }
+
+    #[test]
+    fn balanced_opponent_reply_right_after_a_recap_waits_a_ply() {
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        // The student's move swung the game; the coach recapped at ply 5.
+        assert_eq!(
+            p.on_student_move(&swing(30, -300), &[], 3, 5, Phase::Middlegame, false),
+            Decision::ShiftRecap { from_ply: 0 }
+        );
+        // The opponent's reply lands and the eval settles much lower.
+        // That is the same story the coach just told, not a new one.
+        let mut c = ctx();
+        c.ply = 6;
+        c.eval_for_student_cp = Some(-1_200);
+        c.eval_swing_cp = -900;
+        assert_eq!(p.on_opponent_move(&c), Decision::Silent);
+        // If it holds through the student's next move, the drift from the
+        // anchor (25% to about 1%) fires then, with the window starting
+        // at the recap.
+        assert_eq!(
+            p.on_student_move(&swing(-1_200, -1_200), &[], 4, 7, Phase::Middlegame, false),
+            Decision::ShiftRecap { from_ply: 5 }
+        );
+
+        // A mate threat in the immediate reply is still news.
+        let mut p = CommentaryPolicy::new(CommentaryStyle::Balanced);
+        assert!(matches!(
+            p.on_student_move(&swing(30, -300), &[], 3, 5, Phase::Middlegame, false),
+            Decision::ShiftRecap { .. }
+        ));
+        let mut c = ctx();
+        c.ply = 6;
+        c.eval_for_student_cp = Some(-9_996);
+        c.threatens_mate = true;
+        assert_eq!(p.on_opponent_move(&c), Decision::ShiftRecap { from_ply: 5 });
     }
 
     #[test]

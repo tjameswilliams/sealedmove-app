@@ -102,6 +102,9 @@ struct GameReviewInfo: Decodable, Equatable {
     /// payload, filled in by whoever requested the review so the sheet can
     /// replay the game.
     var moves: [String] = []
+    /// Starting position of the reviewed game when it was not the standard
+    /// start (scanned positions). Filled in by the requester, like `moves`.
+    var startingFen: String?
 
     private enum CodingKeys: String, CodingKey {
         case headline, summary, strengths, weaknesses, accuracy, acl

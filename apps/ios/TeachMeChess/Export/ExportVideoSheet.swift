@@ -119,10 +119,7 @@ struct ExportVideoSheet: View {
     }
 
     private func label(at ply: Int) -> String {
-        guard ply >= 1, ply - 1 < game.moves.count else { return "start" }
-        let number = (ply + 1) / 2
-        let separator = ply.isMultiple(of: 2) ? "… " : ". "
-        return "\(number)\(separator)\(game.moves[ply - 1])"
+        game.label(intoPly: ply) ?? "start"
     }
 
     private var durationText: String {

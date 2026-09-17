@@ -175,6 +175,22 @@ final class GameViewModel {
     private(set) var lastGameWasLoss = false
     private(set) var whiteToMove = true
 
+    // MARK: Student color / custom start (scanned positions)
+
+    /// Which side the student plays. White in a normal game; a game started
+    /// from a scanned position hands the student whichever side is to move.
+    private(set) var studentIsWhite = true
+    /// Non-nil when the current game began from a custom position (scanned
+    /// board). Rides into the whole-game review, and is mirrored to
+    /// UserDefaults so a resumed custom game replays correctly.
+    private(set) var startingFen: String?
+
+    private static let startingFenKey = "game.startingFen"
+    private static let studentIsWhiteKey = "game.studentIsWhite"
+
+    /// The board is drawn from the student's side of the table.
+    var boardFlipped: Bool { !studentIsWhite }
+
     // MARK: Review mode (rewind)
 
     /// 1-based ply currently under review; nil = live.
@@ -187,12 +203,30 @@ final class GameViewModel {
 
     var isReviewing: Bool { reviewPly != nil }
 
-    /// "3. Nf3" / "3… Nc6" label for a 1-based ply.
+    /// "3. Nf3" / "3… Nc6" label for a 1-based ply, honouring a custom
+    /// start's move number and side to move.
     func plyLabel(_ ply: Int) -> String {
         guard ply >= 1, ply <= moves.count else { return "move \(ply)" }
-        let number = (ply + 1) / 2
-        let separator = ply.isMultiple(of: 2) ? "… " : ". "
-        return "\(number)\(separator)\(moves[ply - 1])"
+        // Odd plies belong to whichever side moved first.
+        let moverIsWhite = ply.isMultiple(of: 2) != startNumbering.whiteFirst
+        let separator = moverIsWhite ? ". " : "… "
+        return "\(moveNumber(forPly: ply))\(separator)\(moves[ply - 1])"
+    }
+
+    /// Move number of a 1-based ply, honouring a custom start's counters.
+    func moveNumber(forPly ply: Int) -> Int {
+        let (firstNumber, whiteFirst) = startNumbering
+        return whiteFirst ? firstNumber + (ply - 1) / 2 : firstNumber + ply / 2
+    }
+
+    /// Move number and side of the game's FIRST half-move: (1, White) from
+    /// the standard start, the FEN's own counters for a scanned position.
+    private var startNumbering: (firstNumber: Int, whiteFirst: Bool) {
+        guard let fen = startingFen else { return (1, true) }
+        let fields = fen.split(separator: " ")
+        let white = fields.count < 2 || fields[1] != "b"
+        let number = fields.count >= 6 ? max(1, Int(fields[5]) ?? 1) : 1
+        return (number, white)
     }
 
     // MARK: Displayed board (live or reviewed)
@@ -420,7 +454,16 @@ final class GameViewModel {
     /// rebuild the coach feed from the stored chat, and post a subtle
     /// system line. Runs on the main thread.
     private func restoreFromResume(_ report: ResumeReportInfo) {
-        let replay = BoardHandle()
+        // A custom-position game restores its setup from the UserDefaults
+        // mirror (the resume report carries no starting FEN). The keys are
+        // only trusted while a game is actually open, and every standard
+        // `newGame()` clears them.
+        let defaults = UserDefaults.standard
+        if let savedFen = defaults.string(forKey: Self.startingFenKey) {
+            startingFen = savedFen
+            studentIsWhite = defaults.object(forKey: Self.studentIsWhiteKey) as? Bool ?? true
+        }
+        let replay = startingFen.flatMap { try? BoardHandle.fromFen(fen: $0) } ?? BoardHandle()
         var replayed = true
         for san in report.historySan where (try? replay.playSan(san: san)) == nil {
             replayed = false
@@ -465,9 +508,9 @@ final class GameViewModel {
             .map { Int($0.atPly) } ?? report.historySan.count
 
         // If the app died between the student's move and the opponent's
-        // reply, it is Black's turn on resume — let the opponent move, or
-        // the game would be stuck (input is White-only).
-        if outcomeText == nil && !whiteToMove {
+        // reply, it is the opponent's turn on resume — let it move, or the
+        // game would be stuck (input is student-side-only).
+        if outcomeText == nil && whiteToMove != studentIsWhite {
             runOpponentTurn()
         }
     }
@@ -593,14 +636,19 @@ final class GameViewModel {
                 // end — offer the paywall, unless StoreKit already shows an
                 // active subscription (claim still syncing to the server).
                 let locallyEntitled = await ProCoachStore.shared.hasLocalEntitlement()
-                let offerPaywall = Self.isPaywallableRejection(error) && !locallyEntitled
+                let purchasable = Self.isPaywallableRejection(error) && !locallyEntitled
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    if purchasable { self.lapseToOnDevice() }
+                    // A lapsed trial on a quiet launch: the student has
+                    // already seen the sheet and chose "Not Now", so the
+                    // on-device coach simply carries on without a nag.
+                    if purchasable && !announce && Self.trialExpiryPrompted { return }
                     let line = "Pro Coach isn't available right now "
                         + "(\(error.localizedDescription)) — keeping the current coach."
                     self.pushCoach(line)
                     self.persistFeed(role: "coach", text: line)
-                    if offerPaywall { self.presentTrialExpiry() }
+                    if purchasable { self.presentTrialExpiry() }
                 }
                 return
             }
@@ -608,15 +656,17 @@ final class GameViewModel {
                 // Tier free = the trial ended and no subscription is linked
                 // — same purchase moment as above.
                 let locallyEntitled = await ProCoachStore.shared.hasLocalEntitlement()
-                let offerPaywall = status.tier == .free && !locallyEntitled
+                let purchasable = status.tier == .free && !locallyEntitled
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    if purchasable { self.lapseToOnDevice() }
+                    if purchasable && !announce && Self.trialExpiryPrompted { return }
                     let line = status.tier == .free
-                        ? "Your Pro Coach trial has ended — keeping the current coach."
-                        : "Pro Coach registration didn't return a token — keeping the current coach."
+                        ? "Your Pro Coach trial has ended, so the on-device coach is taking over. Pro Coach is one tap away in Settings."
+                        : "Pro Coach registration didn't return a token, so the current coach stays on."
                     self.pushCoach(line)
                     self.persistFeed(role: "coach", text: line)
-                    if offerPaywall { self.presentTrialExpiry() }
+                    if purchasable { self.presentTrialExpiry() }
                 }
                 return
             }
@@ -683,7 +733,13 @@ final class GameViewModel {
 
     /// The proactive launch prompt fires once per lapsed trial; reactive
     /// triggers (the student actively selecting Pro Coach) always show.
+    /// The silent launch-time restore of a saved Pro Coach preference
+    /// counts as proactive: once "Not Now" has been tapped, it stays quiet.
     private static let trialExpiryPromptedKey = "procoach.trialExpiryPrompted"
+
+    private static var trialExpiryPrompted: Bool {
+        UserDefaults.standard.bool(forKey: trialExpiryPromptedKey)
+    }
 
     private func presentTrialExpiry() {
         UserDefaults.standard.set(true, forKey: Self.trialExpiryPromptedKey)
@@ -713,13 +769,26 @@ final class GameViewModel {
             else { return }
             status = fresh
         }
-        guard status.tier == .free,
-              !UserDefaults.standard.bool(forKey: Self.trialExpiryPromptedKey)
-        else { return }
+        guard status.tier == .free, !Self.trialExpiryPrompted else { return }
         // An active StoreKit entitlement means the claim just hasn't
         // synced — not a lapse; the claim path handles it.
         guard !(await ProCoachStore.shared.hasLocalEntitlement()) else { return }
+        lapseToOnDevice()
         presentTrialExpiry()
+    }
+
+    /// A lapsed trial with nothing to replace it: the saved provider
+    /// flips to on-device so Settings shows what is really coaching, and
+    /// the live session follows if it was still on the proxy. Quiet on
+    /// purpose; the trial-expiry sheet or feed line does the explaining.
+    private func lapseToOnDevice() {
+        var settings = BackendSettings.load()
+        guard settings.provider == .proCoach else { return }
+        settings.provider = .onDevice
+        settings.save()
+        if activeProvider == .proCoach {
+            applyBackend(settings, announce: false)
+        }
     }
 
     /// The student chose the free coach over subscribing (trial-expiry
@@ -728,6 +797,16 @@ final class GameViewModel {
     func switchToFreeCoach() {
         var settings = BackendSettings.load()
         settings.provider = .onDevice
+        settings.save()
+        applyBackend(settings)
+    }
+
+    /// A subscription just landed (purchase or restore): Pro Coach becomes
+    /// the saved provider and the live session moves onto the refreshed
+    /// registration, so the very next coach reply uses it.
+    func activateProCoachSubscription() {
+        var settings = BackendSettings.load()
+        settings.provider = .proCoach
         settings.save()
         applyBackend(settings)
     }
@@ -801,18 +880,26 @@ final class GameViewModel {
     // MARK: - Intents
 
     func newGame() {
+        newGame(fromFen: nil)
+    }
+
+    /// Start a game from a custom position (a scanned board). The student
+    /// plays whichever side is to move in `fen`; `nil` is the standard
+    /// start with the student as White.
+    func newGame(fromFen fen: String?) {
         guard !isPipelineRunning else { return }
         gameSummary = nil
         exitReview()
+        applyCustomStart(fen)
         guard let session else {
-            resetLocalBoard()
+            resetLocalBoard(fromFen: fen)
             return
         }
         isPipelineRunning = true
         sessionQueue.async { [weak self] in
             let error: String? = {
                 do {
-                    try session.resetGame(fen: nil)
+                    try session.resetGame(fen: fen)
                     return nil
                 } catch {
                     return error.localizedDescription
@@ -827,9 +914,30 @@ final class GameViewModel {
                     self.persistFeed(role: "coach", text: line)
                     return
                 }
-                self.resetLocalBoard()
+                self.resetLocalBoard(fromFen: fen)
             }
         }
+    }
+
+    /// Record who plays which side for the game about to start, and mirror
+    /// it to UserDefaults so a mid-game relaunch restores the same setup.
+    private func applyCustomStart(_ fen: String?) {
+        startingFen = fen
+        studentIsWhite = fen.map { Self.fenIsWhiteToMove($0) } ?? true
+        let defaults = UserDefaults.standard
+        if let fen {
+            defaults.set(fen, forKey: Self.startingFenKey)
+        } else {
+            defaults.removeObject(forKey: Self.startingFenKey)
+        }
+        defaults.set(studentIsWhite, forKey: Self.studentIsWhiteKey)
+    }
+
+    /// Side to move in a FEN ("w" in field 2). Defaults to White on a
+    /// malformed string; callers validate the FEN before it gets here.
+    static func fenIsWhiteToMove(_ fen: String) -> Bool {
+        let fields = fen.split(separator: " ")
+        return fields.count < 2 || fields[1] != "b"
     }
 
     /// Resign the current game: counts as a loss, finalizes the stored game
@@ -886,9 +994,10 @@ final class GameViewModel {
     func tap(square: String) {
         clearSpotlight()
         guard outcomeText == nil, !isPipelineRunning, !isReviewing else { return }
-        // With a live session the student plays White; the pipeline moves
-        // for Black. Without one, the board is free-play for both sides.
-        if sessionReady && !whiteToMove { return }
+        // With a live session the student plays their own side (White in a
+        // normal game, the scanned side otherwise); the pipeline moves for
+        // the opponent. Without one, the board is free-play for both sides.
+        if sessionReady && whiteToMove != studentIsWhite { return }
 
         if let from = selectedSquare {
             if square == from {
@@ -914,7 +1023,7 @@ final class GameViewModel {
     /// is untouched.
     func enterReview(ply: Int) {
         guard ply >= 1, ply <= moves.count else { return }
-        let replay = BoardHandle()
+        let replay = replayBoard()
         var before: [String: Piece] = Self.parseFenBoard(replay.fen())
         for (i, san) in moves.prefix(ply).enumerated() {
             if i == ply - 1 { before = Self.parseFenBoard(replay.fen()) }
@@ -1039,7 +1148,8 @@ final class GameViewModel {
     /// sweeps every position, then re-searches the turning points), so the
     /// caller shows progress; the result lands in `gameReview`.
     func requestReview() {
-        requestReview(subject: .liveGame, moves: moves, startingFen: nil, studentIsWhite: true)
+        requestReview(subject: .liveGame, moves: moves,
+                      startingFen: startingFen, studentIsWhite: studentIsWhite)
     }
 
     /// Same, for a game out of the history store. The live game is never
@@ -1085,10 +1195,112 @@ final class GameViewModel {
                 // The move list rides along so the sheet can replay the game
                 // without going back to the store.
                 review.moves = moves
+                review.startingFen = startingFen
                 self.gameReview = review
                 self.reviewSubject = subject
             }
         }
+    }
+
+    // MARK: - Puzzle solving (scanned positions)
+
+    /// Ask the analyst engine for the best line from an arbitrary FEN. The
+    /// blocking FFI call runs on the session queue (it holds the session
+    /// mutex, so it also never races the move pipeline); the result hops
+    /// back to the main thread. Depth 20 keeps tactics sharp without
+    /// pinning the phone for long.
+    func solvePosition(
+        fen: String, depth: UInt32 = 20,
+        completion: @escaping (Result<SolutionLine, Error>) -> Void
+    ) {
+        guard let session, sessionReady else {
+            completion(.failure(PuzzleSolver.SolveError.engineUnavailable))
+            return
+        }
+        sessionQueue.async {
+            let result: Result<SolutionLine, Error>
+            do {
+                let json = try session.analyzeFen(fen: fen, depth: depth, multipv: 1)
+                result = .success(try PuzzleSolver.solution(fromAnalysisJson: json, fen: fen))
+            } catch {
+                result = .failure(error)
+            }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    // MARK: - Scanned-position coaching
+
+    /// Answer a question about a scanned position ("why does the queen
+    /// sacrifice work?"): analyze the FEN with MultiPV so the coach sees
+    /// the best line AND the runner-up (a sacrifice is only explainable
+    /// against the alternatives), then ask the coach with the engine facts
+    /// in the same invisible grounding-prefix style the review chat uses.
+    /// Both blocking calls run on the session queue.
+    func askAboutPosition(
+        fen: String, question: String,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        guard let session, sessionReady else {
+            completion(.failure(PuzzleSolver.SolveError.engineUnavailable))
+            return
+        }
+        // The canned stub can't write prose about a specific position; the
+        // engine facts themselves are a better answer than pool text (and
+        // skipping chat() keeps the game feed clean).
+        let engineFactsOnly = activeProvider == .onDevice && onDeviceIsStub
+        sessionQueue.async {
+            let result: Result<String, Error>
+            do {
+                let json = try session.analyzeFen(fen: fen, depth: 20, multipv: 2)
+                let lines = try PuzzleSolver.solutions(fromAnalysisJson: json, fen: fen)
+                if engineFactsOnly {
+                    result = .success(Self.engineFactsAnswer(lines: lines))
+                } else {
+                    let outgoing = Self.scanGrounding(fen: fen, lines: lines) + " " + question
+                    result = .success(try session.chat(text: outgoing))
+                }
+            } catch {
+                result = .failure(error)
+            }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    /// Deterministic engine-verdict answer for the no-LLM coach.
+    private static func engineFactsAnswer(lines: [SolutionLine]) -> String {
+        var parts: [String] = []
+        if let best = lines.first {
+            parts.append("The engine's verdict: \(best.headline). Best line: "
+                + best.moveLabels.joined(separator: " ") + ".")
+        }
+        if lines.count > 1 {
+            let second = lines[1]
+            parts.append("The next-best try (\(second.headline)): "
+                + second.moveLabels.joined(separator: " ") + ".")
+        }
+        parts.append("For a spoken-word explanation, switch the coach to "
+            + "Apple Intelligence or Pro Coach in Settings.")
+        return parts.joined(separator: " ")
+    }
+
+    private static func scanGrounding(fen: String, lines: [SolutionLine]) -> String {
+        let mover = fenIsWhiteToMove(fen) ? "White" : "Black"
+        var facts: [String] = []
+        if let best = lines.first {
+            facts.append("best line (\(best.headline)): "
+                + best.moveLabels.joined(separator: " "))
+        }
+        if lines.count > 1 {
+            let second = lines[1]
+            facts.append("second-best line (\(second.headline)): "
+                + second.moveLabels.joined(separator: " "))
+        }
+        return "[The student scanned this position from a photo; it is NOT "
+            + "the game on the board. FEN: \(fen). \(mover) to move. "
+            + "Engine analysis at depth 20: \(facts.joined(separator: "; ")). "
+            + "Answer the student's question about THIS position, grounded "
+            + "in these engine lines.]"
     }
 
     // MARK: - Coach spotlight
@@ -1193,11 +1405,18 @@ final class GameViewModel {
 
     /// FEN after the first `plies` half-moves of the live game.
     private func fenAfter(plies: Int) -> String {
-        let replay = BoardHandle()
+        let replay = replayBoard()
         for san in moves.prefix(plies) {
             guard (try? replay.playSan(san: san)) != nil else { break }
         }
         return replay.fen()
+    }
+
+    /// A fresh board at the live game's starting position (standard start,
+    /// or the scanned FEN for a custom game) — the base every history
+    /// replay must start from.
+    func replayBoard() -> BoardHandle {
+        startingFen.flatMap { try? BoardHandle.fromFen(fen: $0) } ?? BoardHandle()
     }
 
     // MARK: - Move pipeline
@@ -1364,15 +1583,17 @@ final class GameViewModel {
     }
 
     /// Called on `sessionQueue` once the session reports game over: map the
-    /// result (student is White), close out the game, persist the profile,
-    /// and surface the summary sheet.
+    /// result to the student's side, close out the game, persist the
+    /// profile, and surface the summary sheet.
     private func finishGameOnQueue(session: CoachSessionHandle) {
         let outcome = (try? BoardHandle.fromFen(fen: session.fen()))?
             .outcomeText() ?? "Game over"
+        let studentWon = studentIsWhite ? "1-0" : "0-1"
+        let studentLost = studentIsWhite ? "0-1" : "1-0"
         let result: FfiGameResult
-        if outcome.contains("1-0") {
+        if outcome.contains(studentWon) {
             result = .win
-        } else if outcome.contains("0-1") {
+        } else if outcome.contains(studentLost) {
             result = .loss
         } else {
             result = .draw
@@ -1416,8 +1637,8 @@ final class GameViewModel {
 
     // MARK: - Local board helpers
 
-    private func resetLocalBoard() {
-        board = BoardHandle()
+    private func resetLocalBoard(fromFen fen: String? = nil) {
+        board = fen.flatMap { try? BoardHandle.fromFen(fen: $0) } ?? BoardHandle()
         liveLastMoveSquares = []
         liveVerdictSquare = nil
         liveVerdictJudgment = nil
@@ -1429,8 +1650,11 @@ final class GameViewModel {
         gameReview = nil
         reviewSubject = nil
         reviewError = nil
-        pushCoach("Fresh board — you're White. Your move!")
-        persistFeed(role: "coach", text: "Fresh board — you're White. Your move!")
+        let greeting = fen == nil
+            ? "Fresh board — you're White. Your move!"
+            : "Position set. You're playing \(studentIsWhite ? "White" : "Black"), and it's your move."
+        pushCoach(greeting)
+        persistFeed(role: "coach", text: greeting)
         announcePlacementIfPending()
         refresh()
     }

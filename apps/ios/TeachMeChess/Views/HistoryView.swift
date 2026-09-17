@@ -274,10 +274,14 @@ struct GameDetailScreen: View {
     }
 
     /// Which colour the student had, from the first move the store marked
-    /// as theirs (move plies are 0-based, so an even ply is White).
+    /// as theirs (move plies are 0-based, so an even ply belongs to the
+    /// side that moved first — White from the standard start, but the FEN's
+    /// side to move for a custom-position game).
     static func studentIsWhite(_ detail: GameDetailInfo) -> Bool {
-        detail.moves.first(where: { $0.byStudent })
-            .map { $0.ply.isMultiple(of: 2) } ?? true
+        let firstMoverIsWhite = detail.game.startingFen
+            .map { GameViewModel.fenIsWhiteToMove($0) } ?? true
+        return detail.moves.first(where: { $0.byStudent })
+            .map { $0.ply.isMultiple(of: 2) == firstMoverIsWhite } ?? true
     }
 
     @ViewBuilder

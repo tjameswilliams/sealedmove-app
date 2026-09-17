@@ -14,6 +14,7 @@ struct GameScreen: View {
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showLexicon = false
+    @State private var showScan = false
     @State private var showNewGameDialog = false
     @State private var showReview = false
     /// The chat sheet ("Ask the coach") is up.
@@ -48,16 +49,28 @@ struct GameScreen: View {
                         // empty. They track the board's width so they keep
                         // hugging its edges.
                         VStack(spacing: 2) {
+                            // Top tray: the opponent's captures. The student
+                            // is White in a normal game, but plays Black
+                            // when a scanned position says so — the trays
+                            // (and the board) follow their seat.
                             CapturedTrayRow(
-                                letters: model.material.capturedByBlack,
-                                advantage: model.material.blackAdvantage)
+                                letters: model.studentIsWhite
+                                    ? model.material.capturedByBlack
+                                    : model.material.capturedByWhite,
+                                advantage: model.studentIsWhite
+                                    ? model.material.blackAdvantage
+                                    : model.material.whiteAdvantage)
                                 .frame(width: side, alignment: .leading)
                                 .padding(.leading, 4)
-                            BoardView(model: model)
+                            BoardView(model: model, flipped: model.boardFlipped)
                                 .frame(width: side, height: side)
                             CapturedTrayRow(
-                                letters: model.material.capturedByWhite,
-                                advantage: model.material.whiteAdvantage)
+                                letters: model.studentIsWhite
+                                    ? model.material.capturedByWhite
+                                    : model.material.capturedByBlack,
+                                advantage: model.studentIsWhite
+                                    ? model.material.whiteAdvantage
+                                    : model.material.blackAdvantage)
                                 .frame(width: side, alignment: .leading)
                                 .padding(.leading, 4)
                         }
@@ -123,6 +136,14 @@ struct GameScreen: View {
                     }
                     .accessibilityLabel("Chess lexicon")
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showScan = true
+                    } label: {
+                        Image(systemName: "camera.viewfinder")
+                    }
+                    .accessibilityLabel("Scan a board")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button("New Game") {
                         // Mid-game the button asks: abandon or resign?
@@ -154,6 +175,9 @@ struct GameScreen: View {
             }
             .sheet(isPresented: $showLexicon) {
                 LexiconBrowser()
+            }
+            .sheet(isPresented: $showScan) {
+                ScanBoardSheet(model: model)
             }
             .sheet(item: $model.presentedLexicon) { entry in
                 LexiconSheet(entry: entry)
@@ -291,13 +315,15 @@ struct GameScreen: View {
 
     private var latestPairText: String {
         guard !model.moves.isEmpty else { return "No moves yet" }
-        let lastPairStart = (model.moves.count - 1) / 2 * 2
-        let number = lastPairStart / 2 + 1
-        var text = "\(number). \(model.moves[lastPairStart])"
-        if lastPairStart + 1 < model.moves.count {
-            text += " \(model.moves[lastPairStart + 1])"
+        let count = model.moves.count
+        let lastLabel = model.plyLabel(count)
+        // A "12… Nc6" label closes a pair: show the White half before it
+        // when the game has one. `plyLabel` carries the right numbering for
+        // custom starts (scanned positions), so no parity math here.
+        if count >= 2, lastLabel.contains("…") {
+            return "\(model.plyLabel(count - 1)) \(model.moves[count - 1])"
         }
-        return text
+        return lastLabel
     }
 
     private var movesPill: some View {
@@ -851,7 +877,7 @@ private struct MoveListSheet: View {
                 Section {
                     ForEach(pairIndices, id: \.self) { pairStart in
                         HStack(spacing: 12) {
-                            Text("\(pairStart / 2 + 1).")
+                            Text("\(model.moveNumber(forPly: pairStart + 1)).")
                                 .font(.system(.subheadline, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .frame(width: 34, alignment: .trailing)

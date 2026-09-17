@@ -506,7 +506,8 @@ struct GameReviewSheet: View {
     /// the sheet — the earlier positions stay browsable.
     private func rebuildPositions() {
         guard let review else { return }
-        let board = BoardHandle()
+        let board = review.startingFen
+            .flatMap { try? BoardHandle.fromFen(fen: $0) } ?? BoardHandle()
         var list = [board.fen()]
         for san in review.moves {
             guard (try? board.playSan(san: san)) != nil else { break }

@@ -92,13 +92,12 @@ struct SettingsSheet: View {
                 }
 
                 Section("Coach provider") {
-                    Picker("Provider", selection: $settings.provider) {
-                        ForEach(CoachProvider.allCases) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
+                    providerRow(.onDevice)
+                    // A lapsed trial greys Pro Coach out: it can't be
+                    // selected until a subscription lands, and the Pro
+                    // Coach section below carries the Subscribe button.
+                    providerRow(.proCoach, disabled: proCoachLapsed,
+                                note: proCoachLapsed ? "Trial ended" : nil)
                 }
 
                 providerFields
@@ -140,9 +139,47 @@ struct SettingsSheet: View {
         }
     }
 
+    /// The trial is over and no subscription replaces it (StoreKit's
+    /// local answer stands in while a claim is still syncing).
+    @MainActor private var proCoachLapsed: Bool {
+        proCoachStatus?.tier == .free && !ProCoachStore.shared.localEntitlementActive
+    }
+
+    /// One row of the provider picker: a checkmark on the selection, and
+    /// an optional greyed-out state with a short note explaining why.
+    private func providerRow(_ provider: CoachProvider, disabled: Bool = false,
+                             note: String? = nil) -> some View {
+        Button {
+            settings.provider = provider
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(provider.displayName)
+                    if let note {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .foregroundStyle(disabled ? .secondary : .primary)
+                Spacer()
+                if settings.provider == provider {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
     @ViewBuilder
     private var providerFields: some View {
-        switch settings.provider {
+        // The Pro Coach section stays up while the trial is lapsed even
+        // though on-device is selected: that is where Subscribe lives.
+        switch settings.provider == .proCoach || proCoachLapsed ? CoachProvider.proCoach : .onDevice {
         case .onDevice:
             Section {
                 Label(model.onDeviceBackendName, systemImage: "iphone")
@@ -173,7 +210,12 @@ struct SettingsSheet: View {
                     ProCoachPurchaseControls(
                         model: model,
                         secondary: proCoachStatus?.tier == .trial,
-                        onSubscribed: { proCoachStatus = ProCoachAccount.storedStatus() })
+                        onSubscribed: {
+                            // The purchase selected and applied Pro Coach;
+                            // mirror both so the rows and status agree.
+                            proCoachStatus = ProCoachAccount.storedStatus()
+                            settings = BackendSettings.load()
+                        })
                 }
                 // Guideline 3.1.2: terms + privacy alongside the offer.
                 Link("Terms of Use", destination: Legal.termsURL)

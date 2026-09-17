@@ -13,6 +13,11 @@ targets:
       - path: TeachMeChess
         excludes:
           - Configuration.storekit
+      # On-device board recognizer, trained by ml/boardvision (see its
+      # README). Must be in the sources phase so Xcode compiles it to
+      # BoardVision.mlmodelc in the app bundle.
+      - path: Models/BoardVision.mlpackage
+        buildPhase: sources
     # Config.xcconfig optionally pulls in the gitignored signing.xcconfig
     # (DEVELOPMENT_TEAM for running on a physical device — see README's
     # "Run on your iPhone"). Simulator builds work fine without it.
@@ -50,14 +55,17 @@ targets:
         # The share sheet's "Save Video" activity (exported game videos)
         # needs the add-only photo permission string.
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "Sealed Move saves exported game videos to your photo library only when you choose Save Video."
+        # The scan-a-board flow photographs a chess position to set it up
+        # on the app's board.
+        INFOPLIST_KEY_NSCameraUsageDescription: "Sealed Move uses the camera to photograph a chess board so you can play or analyze that position."
         # App Store validation requires explicit orientations (error 90474).
         # The docked board/coach layout is portrait-by-design; on iPad it
         # runs full-screen portrait rather than untested multitasking sizes.
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
         INFOPLIST_KEY_UIRequiresFullScreen: YES
-        CURRENT_PROJECT_VERSION: 4
-        MARKETING_VERSION: "0.3.0"
+        CURRENT_PROJECT_VERSION: 5
+        MARKETING_VERSION: "0.4.0"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         # Automatic signing for device runs; the DEVELOPMENT_TEAM comes from

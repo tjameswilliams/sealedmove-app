@@ -17,6 +17,13 @@ struct ExportableGame {
     let estRating: UInt32
     let movesJudged: UInt32
     let openingName: String?
+    /// Precomputed "12… Nc6" labels, one per move — set when the game does
+    /// not start from move one as White (scanned positions), where deriving
+    /// numbering from the ply index would be wrong. Nil = derive.
+    let moveLabels: [String]?
+    /// A puzzle solution rather than a reviewed game: the closing frame is
+    /// a signature card instead of the accuracy report.
+    let isPuzzle: Bool
 
     init(review: GameReviewInfo, fens: [String]) {
         self.moves = review.moves
@@ -28,6 +35,35 @@ struct ExportableGame {
         self.estRating = review.estRating
         self.movesJudged = review.movesJudged
         self.openingName = review.opening.map { "\($0.name) · \($0.eco)" }
+        self.moveLabels = nil
+        self.isPuzzle = false
+    }
+
+    /// The engine's solution to a scanned position. `subtitle` rides in the
+    /// opening-name slot of the title card ("Scanned puzzle · White to move").
+    init(solutionMoves: [String], fens: [String], moveLabels: [String],
+         headline: String, subtitle: String?) {
+        self.moves = solutionMoves
+        self.fens = fens
+        self.moments = []
+        self.headline = headline
+        self.accuracy = 0
+        self.acl = 0
+        self.estRating = 0
+        self.movesJudged = 0
+        self.openingName = subtitle
+        self.moveLabels = moveLabels
+        self.isPuzzle = true
+    }
+
+    /// "12. Nf3" / "12… Nc6" for the 1-based `ply`, honouring the
+    /// precomputed labels when the game starts mid-count.
+    func label(intoPly ply: Int) -> String? {
+        guard ply >= 1, ply - 1 < moves.count else { return nil }
+        if let moveLabels, ply - 1 < moveLabels.count { return moveLabels[ply - 1] }
+        let number = (ply + 1) / 2
+        let separator = ply.isMultiple(of: 2) ? "… " : ". "
+        return "\(number)\(separator)\(moves[ply - 1])"
     }
 }
 
@@ -111,7 +147,7 @@ enum ExportFrameBuilder {
                 arrow: nil,
                 verdictSquare: nil,
                 verdictJudgment: nil,
-                moveLabel: start == 0 ? nil : moveLabel(intoPly: start, game: game),
+                moveLabel: start == 0 ? nil : game.label(intoPly: start),
                 moment: nil)),
             hold: 1.2))
 
@@ -141,16 +177,25 @@ enum ExportFrameBuilder {
                         MoveResolver.destinationSquare(of: $0.san)
                     },
                     verdictJudgment: moment?.judgment,
-                    moveLabel: moveLabel(intoPly: ply, game: game),
+                    moveLabel: game.label(intoPly: ply),
                     moment: shownMoment)),
                 hold: hold(for: moment, showingNote: options.includeCommentary)))
         }
 
-        frames.append(ExportFrame(
-            content: .report(accuracy: game.accuracy, acl: game.acl,
-                             estRating: game.estRating,
-                             movesJudged: game.movesJudged),
-            hold: 3.0))
+        if game.isPuzzle {
+            // A solution has no accuracy story to report — close on a
+            // signature card instead.
+            frames.append(ExportFrame(
+                content: .title(opening: "Solved on Sealed Move",
+                                headline: game.headline),
+                hold: 3.0))
+        } else {
+            frames.append(ExportFrame(
+                content: .report(accuracy: game.accuracy, acl: game.acl,
+                                 estRating: game.estRating,
+                                 movesJudged: game.movesJudged),
+                hold: 3.0))
+        }
         return frames
     }
 
@@ -180,12 +225,6 @@ enum ExportFrameBuilder {
         return min(8.0, max(3.5, Double(moment.note.count) * 0.045))
     }
 
-    private static func moveLabel(intoPly ply: Int, game: ExportableGame) -> String? {
-        guard ply >= 1, ply - 1 < game.moves.count else { return nil }
-        let number = (ply + 1) / 2
-        let separator = ply.isMultiple(of: 2) ? "… " : ". "
-        return "\(number)\(separator)\(game.moves[ply - 1])"
-    }
 }
 
 // MARK: - Frame view (the video's canvas)

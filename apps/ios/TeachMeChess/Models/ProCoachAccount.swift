@@ -19,7 +19,7 @@ struct ProCoachStatus: Equatable {
         case .pro:
             return "Pro"
         case .free:
-            return "Trial ended — free coach available"
+            return "Trial ended. Using the on-device coach."
         case .trial:
             var parts: [String] = []
             if let trialExpiresAt {
